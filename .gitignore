@@ -1,0 +1,23 @@
+# Entornos virtuales
+venv/
+.env/
+
+# Archivos de Python
+__pycache__/
+*.pyc
+
+# Configuración local
+*.env
+*.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Datos temporales
+tmp/
+
+# Carpeta de datos
+data/
