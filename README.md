@@ -27,5 +27,11 @@ Los datos son recolectados en tiempo real. Parten de la lista de símbolos de `c
 
 1. Clona este repositorio:
    ```bash
-   git clone [https://github.com/sebakremis/FinDataMining.git](https://github.com/sebakremis/FinDataMining.git)
+   git clone https://github.com/sebakremis/FinDataMining.git
    cd FinDataMining
+   ```
+
+2. Instala las dependencias necesarias utilizando el archivo `requirements.txt`:
+   ```bash
+   pip install -r requirements.txt
+   ```
