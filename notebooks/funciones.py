@@ -6,6 +6,7 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 # Funciones ETL
 
@@ -215,3 +216,18 @@ def ols_formula(df, dependent_var, *excluded_cols):
     for col in excluded_cols:
         df_columns.remove(col)
     return dependent_var + ' ~ ' + ' + '.join(df_columns)
+
+
+
+
+def obtener_metricas(y_real, y_pred, nombre_modelo):
+    mse = mean_squared_error(y_real, y_pred)
+    
+    
+    return {
+        'Modelo': nombre_modelo,
+        'MAE': mean_absolute_error(y_real, y_pred),
+        'MSE': mse,
+        'RMSE': np.sqrt(mse),
+        'R2': r2_score(y_real, y_pred)
+    }
