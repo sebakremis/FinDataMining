@@ -1,4 +1,4 @@
-# Funciones
+# funciones.py
 import pandas as pd
 import yfinance as yf
 import numpy as np
@@ -10,22 +10,27 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 # Funciones ETL
 
+# Definir periodo de extracción de datos e intervalo de precios
+periodo = '1y'  # Último año
+intervalo = '1d'  # Precios diarios
+
 def extraer_precios(tickers_list:list)->pd.DataFrame:
     dfs_prices = []
     for ticker in tickers_list:
-        df = yf.Ticker(ticker).history(period='1d')
+        df = yf.Ticker(ticker).history(period=periodo, interval=intervalo)
         df['Ticker'] = ticker
         dfs_prices.append(df)  
         
     # Concatenar en un dataframe
-    df_prices = pd.concat(dfs_prices, ignore_index = True)
+    df_prices = pd.concat(dfs_prices, ignore_index = False)
     
     # Quitar columnas
-    df_prices.drop(['Dividends', 'Stock Splits', 'Capital Gains'], axis=1, inplace= True)
+    df_prices.drop(['Dividends', 'Stock Splits'], axis=1, inplace= True)
 
     return df_prices
 
 def extraer_info(tickers_list:list)->pd.DataFrame:
+    """Extrae información fundamental de una lista de tickers y devuelve un DataFrame con los datos seleccionados."""
     dfs_info = []
 
     for ticker in tickers_list:
@@ -65,8 +70,10 @@ def extraer_info(tickers_list:list)->pd.DataFrame:
             print(f"Error con {ticker}: {e}")
             continue
     
-    df = pd.DataFrame(dfs_info)
-    return df
+    if dfs_info:
+        return pd.DataFrame(dfs_info)
+    else:
+        return pd.DataFrame()
 
 def extraer_financials(tickers_list:list)->pd.DataFrame:
     dfs_financials = []
@@ -82,6 +89,7 @@ def extraer_financials(tickers_list:list)->pd.DataFrame:
                 continue
 
             df_temp = financials_data.T 
+            df_temp = df_temp.iloc[[0]]  # Solo la última fila disponible
             df_temp = df_temp.reindex(columns=columnas)
             df_temp['Ticker'] = ticker
 
@@ -92,7 +100,7 @@ def extraer_financials(tickers_list:list)->pd.DataFrame:
             continue
 
     if dfs_financials:
-        return pd.concat(dfs_financials, axis=0)
+        return pd.concat(dfs_financials, axis=0, ignore_index=True)
     else:
         return pd.DataFrame()
 
@@ -231,3 +239,17 @@ def obtener_metricas(y_real, y_pred, nombre_modelo):
         'RMSE': np.sqrt(mse),
         'R2': r2_score(y_real, y_pred)
     }
+
+def main():
+    """Función principal para ejecutar pruebas desde el terminal.
+    """
+    tickers_prueba = ['AAPL', 'MSFT', 'GOOGL']
+    try:
+        df_precios = extraer_precios(tickers_prueba)
+        print("Precios extraídos con éxito:")
+        print(df_precios.head())
+    except Exception as e:
+        print(f"Error al extraer precios: {e}")
+
+if __name__ == "__main__":
+    main()
