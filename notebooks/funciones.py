@@ -148,7 +148,42 @@ def winsorize_with_pandas(s, limits):
     return s.clip(lower=s.quantile(limits[0], interpolation='lower'), 
                   upper=s.quantile(1-limits[1], interpolation='higher'))
 
-# Graficos
+# Transformaciones
+def reducir_cardinalidad(df, columna, umbral=2, reemplazo='Other'):
+    """
+    Reduce la cardinalidad de una columna categórica reemplazando las categorías menos frecuentes por un valor común.
+
+    Parámetros:
+    - df: DataFrame que contiene la columna.
+    - columna: nombre de la columna categórica.
+    - umbral: si es un entero >=1, representa la frecuencia mínima (número de ocurrencias)
+              para conservar una categoría. Si es un float entre 0 y 1, representa la
+              fracción mínima del total de observaciones para conservar la categoría.
+    - reemplazo: valor con el que se reemplazan las categorías poco frecuentes.
+    """
+    # Calcular las frecuencias
+    frecuencias = df[columna].value_counts()
+
+    # Interpretar umbral: valor entero (min recuento) o proporción (0<umbral<1)
+    if 0 < umbral < 1:
+        min_count = int(np.ceil(umbral * df[columna].dropna().shape[0]))
+    else:
+        min_count = int(umbral)
+
+    # Identificar las etiquetas frecuentes
+    etiquetas_frecuentes = frecuencias[frecuencias >= min_count].index
+
+    # Reemplazar las no frecuentes: operar sobre una copia en tipo objeto
+    s = df[columna].copy()
+    result = s.astype(object).where(s.isin(etiquetas_frecuentes), reemplazo)
+
+    # Si la columna original era categórica, devolver también categórica (con nuevas categorías)
+    if pd.api.types.is_categorical_dtype(s):
+        return result.astype('category')
+    return result
+
+
+# Gráficos
 
 def histogram_boxplot(data, xlabel = None, title = None, font_scale=2, figsize=(9,8), bins = None):
     """ Boxplot and histogram combined
