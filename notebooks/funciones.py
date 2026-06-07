@@ -11,23 +11,256 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 # Funciones ETL
 
 # Definir periodo de extracción de datos e intervalo de precios
-periodo = '1y'  # Último año
-intervalo = '1d'  # Precios diarios
+periodo = '4y'  # Últimos 4 años
+intervalo = '1wk'  # Precios semanales
 
-def extraer_precios(tickers_list:list)->pd.DataFrame:
+def extraer_precios(tickers_list: list) -> pd.DataFrame:
+    """
+    Extrae precios históricos y formatea las fechas para cruzar con datos fundamentales.
+    """
     dfs_prices = []
     for ticker in tickers_list:
         df = yf.Ticker(ticker).history(period=periodo, interval=intervalo)
+        
+        if df.empty:
+            print(f"Sin datos de precio para {ticker}")
+            continue
+            
         df['Ticker'] = ticker
+        
+        # 1. Convertir el índice 'Date' en una columna
+        df = df.reset_index()
         dfs_prices.append(df)  
         
-    # Concatenar en un dataframe
-    df_prices = pd.concat(dfs_prices, ignore_index = False)
+    if not dfs_prices:
+        return pd.DataFrame()
+
+    df_prices = pd.concat(dfs_prices, ignore_index=True)
     
-    # Quitar columnas
-    df_prices.drop(['Dividends', 'Stock Splits'], axis=1, inplace= True)
+    # 2. Eliminar columnas innecesarias (usar errors='ignore' por si no hay splits/dividends)
+    df_prices.drop(['Open', 'High', 'Low', 'Volume', 'Dividends', 'Stock Splits'], axis=1, inplace=True, errors='ignore')
+
+    # 3. Renombrar 'Date' a 'Fecha' y quitar la zona horaria para emparejar con fundamentales
+    df_prices = df_prices.rename(columns={'Date': 'Fecha'})
+    df_prices['Fecha'] = pd.to_datetime(df_prices['Fecha']).dt.tz_localize(None)
 
     return df_prices
+
+
+def extraer_datos_fundamentales(tickers_list: list) -> pd.DataFrame:
+    """
+    Extrae el Estado de Resultados y el Balance General de una lista de tickers,
+    y devuelve un DataFrame unificado ideal para cálculo de ratios históricos.
+    """
+    dfs_lista = []
+    
+    # Separamos las columnas según de qué reporte provienen
+    cols_resultados = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income', 
+                   'EBITDA', 'Basic Average Shares'] 
+
+    cols_balance = ['Cash And Cash Equivalents', 'Current Debt', 'Long Term Debt', 
+                'Total Debt', 'Stockholders Equity', 'Total Assets', 'Current Assets', 'Current Liabilities'] 
+
+    for ticker in tickers_list:
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            
+            # 1. Extraer ambos reportes anuales
+            fin = yf_ticker.financials
+            bal = yf_ticker.balance_sheet
+
+            # Validación del Estado de Resultados
+            if fin is None or fin.empty:
+                print(f"Sin datos financieros para {ticker}")
+                continue
+
+            # 2. Transponer y filtrar Estado de Resultados
+            df_fin = fin.T.reindex(columns=cols_resultados)
+
+            # 3. Transponer y filtrar Balance General (si existe)
+            if bal is not None and not bal.empty:
+                df_bal = bal.T.reindex(columns=cols_balance)
+                # Unimos ambos reportes usando la fecha (que actualmente es el índice)
+                df_temp = df_fin.join(df_bal, how='left')
+            else:
+                # Si no hay balance, nos quedamos con financials y llenamos el resto con nulos
+                df_temp = df_fin
+                for col in cols_balance:
+                    df_temp[col] = pd.NA
+
+            # 4. Limpieza del DataFrame temporal
+            df_temp = df_temp.reset_index() # Pasamos la fecha del índice a una columna
+            df_temp = df_temp.rename(columns={'index': 'Fecha'})
+            df_temp['Ticker'] = ticker # Identificador del activo
+            
+            dfs_lista.append(df_temp)
+
+        except Exception as e:
+            print(f"Error procesando fundamentales para {ticker}: {e}")
+            continue
+
+    # 5. Concatenación final
+    if dfs_lista:
+        # ignore_index=True es clave aquí para tener un índice numérico limpio (0, 1, 2...)
+        df_final = pd.concat(dfs_lista, axis=0, ignore_index=True)
+        # Opcional: Asegurar que la fecha tenga formato datetime
+        df_final['Fecha'] = pd.to_datetime(df_final['Fecha']).dt.tz_localize(None)
+        return df_final
+    else:
+        return pd.DataFrame()
+
+
+def extraer_financials(tickers_list:list)->pd.DataFrame:
+    """
+    Extrae información financiera de una lista de tickers y devuelve un DataFrame con los datos seleccionados.
+    """
+    dfs_financials = []
+    columnas = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income']
+    for ticker in tickers_list:
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            financials_data = yf_ticker.financials
+
+            # Validación
+            if financials_data is None or financials_data.empty:
+                print(f"Sin datos para {ticker}")
+                continue
+
+            df_temp = financials_data.T 
+            # df_temp = df_temp.iloc[[0]]  # Solo la última fila disponible
+            df_temp = df_temp.reindex(columns=columnas)
+            df_temp['Ticker'] = ticker
+
+            dfs_financials.append(df_temp)
+
+        except Exception as e:
+            print(f"Error fetching financials for {ticker}: {e}")
+            continue
+
+    if dfs_financials:
+        return pd.concat(dfs_financials, axis=0, ignore_index=False)
+    else:
+        return pd.DataFrame()
+
+
+# Calculo de métricas
+
+def calcular_betas(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana_semanas: int = 52) -> pd.DataFrame:
+    """
+    Calcula el Beta dinámico (móvil) para cada fecha basándose en una ventana 
+    de tiempo previa (por defecto 52 semanas).
+    """
+    ticker_mercado = df_index['Ticker'].iloc[0]
+    
+    # 1. Unir y pivotear para tener fechas alineadas
+    df_unido = pd.concat([df_precios, df_index], ignore_index=True)
+    df_pivot = df_unido.pivot(index='Fecha', columns='Ticker', values='Close')
+    
+    # 2. Calcular retornos porcentuales semanales
+    df_retornos = df_pivot.pct_change()
+    
+    # 3. Separar los retornos del mercado y calcular su Varianza Móvil
+    retornos_mercado = df_retornos[ticker_mercado]
+    varianza_mercado_movil = retornos_mercado.rolling(window=ventana_semanas).var()
+    
+    dfs_betas_historicos = []
+    
+    # 4. Iterar sobre cada acción
+    for ticker in df_retornos.columns:
+        if ticker == ticker_mercado:
+            continue
+            
+        retornos_activo = df_retornos[ticker]
+        
+        # Calcular la Covarianza Móvil entre la acción y el mercado
+        covarianza_movil = retornos_activo.rolling(window=ventana_semanas).cov(retornos_mercado)
+        
+        # Calcular el Beta Móvil (Fórmula: Covarianza / Varianza)
+        beta_movil = covarianza_movil / varianza_mercado_movil
+        
+        # Estructurar los resultados de vuelta a formato de columnas
+        df_temp = pd.DataFrame({
+            'Fecha': df_retornos.index,
+            'Ticker': ticker,
+            'Beta': beta_movil
+        })
+        dfs_betas_historicos.append(df_temp)
+        
+    # 5. Concatenar todos los tickers
+    df_betas_final = pd.concat(dfs_betas_historicos, ignore_index=True)
+    
+    # Redondear para que quede limpio
+    df_betas_final['Beta'] = df_betas_final['Beta'].round(4)
+    
+    return df_betas_final
+
+
+
+def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Recibe el DataFrame limpio de precios y fundamentales alineados, 
+    y calcula métricas de valoración históricas.
+    """
+    # Trabajamos sobre una copia para no alterar el original inadvertidamente
+    df_metrics = df.copy()
+
+    # --- 1. DATOS BASE ---
+    if 'Basic Average Shares' in df_metrics.columns:
+        df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['Basic Average Shares']
+    else:
+        print("Advertencia: Falta 'Basic Average Shares'. No se calcularán métricas de mercado.")
+        return df_metrics
+
+    # Preparar deuda y efectivo para EV
+    deuda_total = df_metrics['Total Debt'].fillna(
+        df_metrics['Current Debt'].fillna(0) + df_metrics['Long Term Debt'].fillna(0)
+    )
+    efectivo = df_metrics['Cash And Cash Equivalents'].fillna(0)
+    df_metrics['EnterpriseValue'] = df_metrics['MarketCap'] + deuda_total - efectivo
+
+    # --- 2. RATIOS DE VALORACIÓN (Mercado vs Contabilidad) ---
+    df_metrics['PE_Trailing'] = df_metrics['MarketCap'] / df_metrics['Net Income']
+    df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / df_metrics['EBITDA']
+    
+    if 'Stockholders Equity' in df_metrics.columns:
+        df_metrics['PriceToBook'] = df_metrics['MarketCap'] / df_metrics['Stockholders Equity']
+
+    # --- 3. RATIOS DE RENTABILIDAD Y MÁRGENES ---
+    df_metrics['operatingMargins'] = df_metrics['Operating Income'] / df_metrics['Total Revenue']
+    df_metrics['profitMargins'] = df_metrics['Net Income'] / df_metrics['Total Revenue']
+    
+    if 'Stockholders Equity' in df_metrics.columns:
+        df_metrics['returnOnEquity'] = df_metrics['Net Income'] / df_metrics['Stockholders Equity']
+        
+    if 'Total Assets' in df_metrics.columns:
+        df_metrics['ReturnOnAssets'] = df_metrics['Net Income'] / df_metrics['Total Assets']
+
+    # --- 4. RATIOS DE LIQUIDEZ Y SOLVENCIA ---
+    if 'Stockholders Equity' in df_metrics.columns:
+        df_metrics['debtToEquity'] = deuda_total / df_metrics['Stockholders Equity']
+        
+    if 'Current Assets' in df_metrics.columns and 'Current Liabilities' in df_metrics.columns:
+        df_metrics['currentRatio'] = df_metrics['Current Assets'] / df_metrics['Current Liabilities']
+
+    # --- LIMPIEZA FINAL ---
+    # Redondear para legibilidad y consistencia
+    cols_a_redondear = [
+        'PE_Trailing', 'PriceToBook', 'EnterpriseToEbitda', 'operatingMargins', 
+        'profitMargins', 'returnOnEquity', 'ReturnOnAssets', 'debtToEquity', 'currentRatio'
+    ]
+    
+    # Aplicar redondeo solo a las columnas que realmente existen en el df_metrics
+    cols_presentes = [col for col in cols_a_redondear if col in df_metrics.columns]
+    df_metrics[cols_presentes] = df_metrics[cols_presentes].round(4) # 4 decimales para capturar bien los porcentajes
+
+    return df_metrics
+
+
+
+
+
+
+
 
 def extraer_info(tickers_list:list)->pd.DataFrame:
     """Extrae información fundamental de una lista de tickers y devuelve un DataFrame con los datos seleccionados."""
@@ -75,34 +308,7 @@ def extraer_info(tickers_list:list)->pd.DataFrame:
     else:
         return pd.DataFrame()
 
-def extraer_financials(tickers_list:list)->pd.DataFrame:
-    dfs_financials = []
-    columnas = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income']
-    for ticker in tickers_list:
-        try:
-            yf_ticker = yf.Ticker(ticker)
-            financials_data = yf_ticker.financials
 
-            # Validación
-            if financials_data is None or financials_data.empty:
-                print(f"Sin datos para {ticker}")
-                continue
-
-            df_temp = financials_data.T 
-            df_temp = df_temp.iloc[[0]]  # Solo la última fila disponible
-            df_temp = df_temp.reindex(columns=columnas)
-            df_temp['Ticker'] = ticker
-
-            dfs_financials.append(df_temp)
-
-        except Exception as e:
-            print(f"Error fetching financials for {ticker}: {e}")
-            continue
-
-    if dfs_financials:
-        return pd.concat(dfs_financials, axis=0, ignore_index=True)
-    else:
-        return pd.DataFrame()
 
 
 # Gestion de outliers
