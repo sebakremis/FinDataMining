@@ -7,12 +7,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from src.config import periodo, intervalo
 
 # Funciones ETL
-
-# Definir periodo de extracción de datos e intervalo de precios
-periodo = '4y'  # Últimos 4 años
-intervalo = '1wk'  # Precios semanales
 
 def extraer_precios(tickers_list: list) -> pd.DataFrame:
     """
@@ -143,58 +140,53 @@ def extraer_financials(tickers_list:list)->pd.DataFrame:
         return pd.DataFrame()
 
 
-# Calculo de métricas
+def extraer_info(tickers_list:list)->pd.DataFrame:
+    """Extrae información fundamental, sin datos historicos."""
+    dfs_info = []
 
-def calcular_betas(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana_semanas: int = 52) -> pd.DataFrame:
-    """
-    Calcula el Beta dinámico (móvil) para cada fecha basándose en una ventana 
-    de tiempo previa (por defecto 52 semanas).
-    """
-    ticker_mercado = df_index['Ticker'].iloc[0]
+    for ticker in tickers_list:
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            info = yf_ticker.info   
     
-    # 1. Unir y pivotear para tener fechas alineadas
-    df_unido = pd.concat([df_precios, df_index], ignore_index=True)
-    df_pivot = df_unido.pivot(index='Fecha', columns='Ticker', values='Close')
+            # Validación
+            if not isinstance(info, dict) or len(info) == 0:
+                print(f"Sin datos para {ticker}")
+                continue
     
-    # 2. Calcular retornos porcentuales semanales
-    df_retornos = df_pivot.pct_change()
+            # Seleccionar campos
+            row = {
+                'Ticker': ticker,
+                'Sector': info.get('sector'),
+                'MarketCap': info.get('marketCap'),
+                'Beta': info.get('beta'),
+                'DividendYield': info.get('dividendYield'),
+                'ForwardPE': info.get('forwardPE'),
+                'trailingPegRatio': info.get('trailingPegRatio'),
+                'PriceToBook': info.get('priceToBook'),
+                'EnterpriseToEbitda': info.get('enterpriseToEbitda'),
+                'ReturnOnAssets': info.get('returnOnAssets'),
+                'returnOnEquity': info.get('returnOnEquity'),
+                'profitMargins': info.get('profitMargins'),
+                'operatingMargins': info.get('operatingMargins'),
+                'currentRatio': info.get('currentRatio'),
+                'debtToEquity': info.get('debtToEquity'),
+                'revenueGrowth': info.get('revenueGrowth'),
+                'shortPercentOfFloat': info.get('shortPercentOfFloat')
+            }
     
-    # 3. Separar los retornos del mercado y calcular su Varianza Móvil
-    retornos_mercado = df_retornos[ticker_mercado]
-    varianza_mercado_movil = retornos_mercado.rolling(window=ventana_semanas).var()
+            dfs_info.append(row)
     
-    dfs_betas_historicos = []
-    
-    # 4. Iterar sobre cada acción
-    for ticker in df_retornos.columns:
-        if ticker == ticker_mercado:
+        except Exception as e:
+            print(f"Error con {ticker}: {e}")
             continue
-            
-        retornos_activo = df_retornos[ticker]
-        
-        # Calcular la Covarianza Móvil entre la acción y el mercado
-        covarianza_movil = retornos_activo.rolling(window=ventana_semanas).cov(retornos_mercado)
-        
-        # Calcular el Beta Móvil (Fórmula: Covarianza / Varianza)
-        beta_movil = covarianza_movil / varianza_mercado_movil
-        
-        # Estructurar los resultados de vuelta a formato de columnas
-        df_temp = pd.DataFrame({
-            'Fecha': df_retornos.index,
-            'Ticker': ticker,
-            'Beta': beta_movil
-        })
-        dfs_betas_historicos.append(df_temp)
-        
-    # 5. Concatenar todos los tickers
-    df_betas_final = pd.concat(dfs_betas_historicos, ignore_index=True)
     
-    # Redondear para que quede limpio
-    df_betas_final['Beta'] = df_betas_final['Beta'].round(4)
-    
-    return df_betas_final
+    if dfs_info:
+        return pd.DataFrame(dfs_info)
+    else:
+        return pd.DataFrame()
 
-
+# Cálculos de métricas financieras y ratios de valuación
 
 def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -256,64 +248,61 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     return df_metrics
 
 
-
-
-
-
-
-
-def extraer_info(tickers_list:list)->pd.DataFrame:
-    """Extrae información fundamental de una lista de tickers y devuelve un DataFrame con los datos seleccionados."""
-    dfs_info = []
-
-    for ticker in tickers_list:
-        try:
-            yf_ticker = yf.Ticker(ticker)
-            info = yf_ticker.info   
+def calcular_betas(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana_semanas: int = 52) -> pd.DataFrame:
+    """
+    Calcula el Beta dinámico (móvil) para cada fecha basándose en una ventana 
+    de tiempo previa (por defecto 52 semanas).
+    """
+    ticker_mercado = df_index['Ticker'].iloc[0]
     
-            # Validación
-            if not isinstance(info, dict) or len(info) == 0:
-                print(f"Sin datos para {ticker}")
-                continue
+    # 1. Unir y pivotear para tener fechas alineadas
+    df_unido = pd.concat([df_precios, df_index], ignore_index=True)
+    df_pivot = df_unido.pivot(index='Fecha', columns='Ticker', values='Close')
     
-            # Seleccionar campos
-            row = {
-                'Ticker': ticker,
-                'Sector': info.get('sector'),
-                'MarketCap': info.get('marketCap'),
-                'Beta': info.get('beta'),
-                'DividendYield': info.get('dividendYield'),
-                'ForwardPE': info.get('forwardPE'),
-                'trailingPegRatio': info.get('trailingPegRatio'),
-                'PriceToBook': info.get('priceToBook'),
-                'EnterpriseToEbitda': info.get('enterpriseToEbitda'),
-                'ReturnOnAssets': info.get('returnOnAssets'),
-                'returnOnEquity': info.get('returnOnEquity'),
-                'profitMargins': info.get('profitMargins'),
-                'operatingMargins': info.get('operatingMargins'),
-                'currentRatio': info.get('currentRatio'),
-                'debtToEquity': info.get('debtToEquity'),
-                'revenueGrowth': info.get('revenueGrowth'),
-                'shortPercentOfFloat': info.get('shortPercentOfFloat')
-            }
+    # 2. Calcular retornos porcentuales semanales
+    df_retornos = df_pivot.pct_change()
     
-            dfs_info.append(row)
+    # 3. Separar los retornos del mercado y calcular su Varianza Móvil
+    retornos_mercado = df_retornos[ticker_mercado]
+    varianza_mercado_movil = retornos_mercado.rolling(window=ventana_semanas).var()
     
-        except Exception as e:
-            print(f"Error con {ticker}: {e}")
+    dfs_betas_historicos = []
+    
+    # 4. Iterar sobre cada acción
+    for ticker in df_retornos.columns:
+        if ticker == ticker_mercado:
             continue
+            
+        retornos_activo = df_retornos[ticker]
+        
+        # Calcular la Covarianza Móvil entre la acción y el mercado
+        covarianza_movil = retornos_activo.rolling(window=ventana_semanas).cov(retornos_mercado)
+        
+        # Calcular el Beta Móvil (Fórmula: Covarianza / Varianza)
+        beta_movil = covarianza_movil / varianza_mercado_movil
+        
+        # Estructurar los resultados de vuelta a formato de columnas
+        df_temp = pd.DataFrame({
+            'Fecha': df_retornos.index,
+            'Ticker': ticker,
+            'Beta': beta_movil
+        })
+        dfs_betas_historicos.append(df_temp)
+        
+    # 5. Concatenar todos los tickers
+    df_betas_final = pd.concat(dfs_betas_historicos, ignore_index=True)
     
-    if dfs_info:
-        return pd.DataFrame(dfs_info)
-    else:
-        return pd.DataFrame()
-
-
-
+    # Redondear para que quede limpio
+    df_betas_final['Beta'] = df_betas_final['Beta'].round(4)
+    
+    return df_betas_final
 
 # Gestion de outliers
     
 def gestiona_outliers(col,clas = 'check'):
+     """
+     Función para detectar y gestionar outliers en una columna numérica.
+     """
     
      print(col.name)
      # Condición de asimetría y aplicación de criterio 1 según el caso
@@ -343,51 +332,13 @@ def gestiona_outliers(col,clas = 'check'):
             print('MissingDespues: ' + str(col.isna().sum()) +'\n')
             return(col)
 
+
 def winsorize_with_pandas(s, limits):
     """
-    s : pd.Series
-        Series to winsorize
-    limits : tuple of float
-        Tuple of the percentages to cut on each side of the array, 
-        with respect to the number of unmasked data, as floats between 0. and 1
+    Aplica winsorización a una Serie de pandas utilizando los cuantiles como límites.
     """
     return s.clip(lower=s.quantile(limits[0], interpolation='lower'), 
                   upper=s.quantile(1-limits[1], interpolation='higher'))
-
-# Transformaciones
-def reducir_cardinalidad(df, columna, umbral=2, reemplazo='Other'):
-    """
-    Reduce la cardinalidad de una columna categórica reemplazando las categorías menos frecuentes por un valor común.
-
-    Parámetros:
-    - df: DataFrame que contiene la columna.
-    - columna: nombre de la columna categórica.
-    - umbral: si es un entero >=1, representa la frecuencia mínima (número de ocurrencias)
-              para conservar una categoría. Si es un float entre 0 y 1, representa la
-              fracción mínima del total de observaciones para conservar la categoría.
-    - reemplazo: valor con el que se reemplazan las categorías poco frecuentes.
-    """
-    # Calcular las frecuencias
-    frecuencias = df[columna].value_counts()
-
-    # Interpretar umbral: valor entero (min recuento) o proporción (0<umbral<1)
-    if 0 < umbral < 1:
-        min_count = int(np.ceil(umbral * df[columna].dropna().shape[0]))
-    else:
-        min_count = int(umbral)
-
-    # Identificar las etiquetas frecuentes
-    etiquetas_frecuentes = frecuencias[frecuencias >= min_count].index
-
-    # Reemplazar las no frecuentes: operar sobre una copia en tipo objeto
-    s = df[columna].copy()
-    result = s.astype(object).where(s.isin(etiquetas_frecuentes), reemplazo)
-
-    # Si la columna original era categórica, devolver también categórica (con nuevas categorías)
-    if pd.api.types.is_categorical_dtype(s):
-        return result.astype('category')
-    return result
-
 
 # Gráficos
 
@@ -420,16 +371,21 @@ def histogram_boxplot(data, xlabel = None, title = None, font_scale=2, figsize=(
     # Mostrar gráfico
     plt.show()
     
-## Función para gráfico de barras de variables categóricas
+   
 def cat_plot(col):
+     """
+     Gráfico de barras para variables categóricas.
+     """
      if col.dtypes == 'category':
         fig = px.bar(col.value_counts())
         #fig = sns.countplot(x=col)
         return(fig)
 
 
-## Función general plot para aplicar al archivo por columnas
 def plot(col):
+     """
+     Función general para aplicar al archivo por columnas, detectando el tipo de variable y aplicando el gráfico adecuado.
+     """
      if col.dtypes != 'category':
         print('Cont')
         histogram_boxplot(col, xlabel = col.name, title = 'Distibución continua')
@@ -439,37 +395,10 @@ def plot(col):
 
 # Modelizar
 
-def cramers_v(var1, varObj):
-
-    # --- var1 ---
-    if pd.api.types.is_numeric_dtype(var1):
-        var1 = pd.cut(var1, bins=5)
-    else:
-        var1 = var1.astype('category')
-
-    # --- varObj ---
-    if pd.api.types.is_numeric_dtype(varObj):
-        varObj = pd.cut(varObj, bins=5)
-    else:
-        varObj = varObj.astype('category')
-
-    tabla = pd.crosstab(var1, varObj)
-    vCramer = stats.contingency.association(tabla.values, method='cramer')
-    return vCramer
-
-
-# Función para generar la fórmula por larga que sea
-def ols_formula(df, dependent_var, *excluded_cols):
-    df_columns = list(df.columns.values)
-    df_columns.remove(dependent_var)
-    for col in excluded_cols:
-        df_columns.remove(col)
-    return dependent_var + ' ~ ' + ' + '.join(df_columns)
-
-
-
-
 def obtener_metricas(y_real, y_pred, nombre_modelo):
+    """
+    Calcula métricas de evaluación para modelos de regresión.
+    """
     mse = mean_squared_error(y_real, y_pred)
     
     
@@ -481,16 +410,11 @@ def obtener_metricas(y_real, y_pred, nombre_modelo):
         'R2': r2_score(y_real, y_pred)
     }
 
+# Bloque principal para pruebas desde el terminal
+
 def main():
-    """Función principal para ejecutar pruebas desde el terminal.
-    """
-    tickers_prueba = ['AAPL', 'MSFT', 'GOOGL']
-    try:
-        df_precios = extraer_precios(tickers_prueba)
-        print("Precios extraídos con éxito:")
-        print(df_precios.head())
-    except Exception as e:
-        print(f"Error al extraer precios: {e}")
+    pass
+
 
 if __name__ == "__main__":
     main()
