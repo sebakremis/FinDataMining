@@ -21,3 +21,6 @@ tmp/
 
 # Carpeta de datos
 data/
+
+# Fichero data_sources.py con la clave api en local
+src/data_sources.py

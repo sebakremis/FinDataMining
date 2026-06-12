@@ -5,7 +5,12 @@ Módulo de funciones para la fase de Ingestión de Datos (Extract).
 
 import pandas as pd
 import yfinance as yf
+from fredapi import Fred
+from src.data_sources import fred_api_key
 from src.config import periodo, intervalo
+from datetime import datetime
+
+
 
 def extraer_precios(tickers_list: list) -> pd.DataFrame:
     """
@@ -244,60 +249,114 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     return df_metrics
 
 
-def calcular_betas(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana_semanas: int = 52) -> pd.DataFrame:
+def calcular_retornos(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = None) -> pd.DataFrame:
     """
-    Calcula el Beta dinámico (móvil) para cada fecha basándose en una ventana 
-    de tiempo previa (por defecto 52 semanas).
+    Calcula retornos mensuales, varianza del activo y covarianza con el mercado.
     """
+    if min_periodos is None:
+        min_periodos = int(ventana * 0.75) # establece ventana minima para los primeros valores
+        
     ticker_mercado = df_index['Ticker'].iloc[0]
     
-    # 1. Unir y pivotear para tener fechas alineadas
+    # Preparar datos y calcular retornos
     df_unido = pd.concat([df_precios, df_index], ignore_index=True)
-    df_pivot = df_unido.pivot(index='Fecha', columns='Ticker', values='Close')
+    df_pivot = df_unido.pivot(index='Fecha', columns='Ticker', values='Close').sort_index()
+    df_retornos = df_pivot.pct_change(fill_method=None).dropna(how='all')
     
-    # 2. Calcular retornos porcentuales semanales
-    df_retornos = df_pivot.pct_change()
-    
-    # 3. Separar los retornos del mercado y calcular su Varianza Móvil
     retornos_mercado = df_retornos[ticker_mercado]
-    varianza_mercado_movil = retornos_mercado.rolling(window=ventana_semanas).var()
+    df_activos = df_retornos.drop(columns=[ticker_mercado])
     
-    dfs_betas_historicos = []
+    # Calcular estadísticas móviles (Features)
+    varianzas_activos = df_activos.rolling(window=ventana, min_periods=min_periodos).var()
+    covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
     
-    # 4. Iterar sobre cada acción
-    for ticker in df_retornos.columns:
-        if ticker == ticker_mercado:
-            continue
+    # Transformar cada matriz a formato largo (melt)
+    df_ret_long = df_activos.reset_index().melt(
+        id_vars='Fecha', var_name='Ticker', value_name='Retorno_Mensual'
+    )
+    df_var_long = varianzas_activos.reset_index().melt(
+        id_vars='Fecha', var_name='Ticker', value_name='Varianza_Activo'
+    )
+    df_cov_long = covarianzas.reset_index().melt(
+        id_vars='Fecha', var_name='Ticker', value_name='Covarianza_Mercado'
+    )
+    
+    # Consolidar todas las features en un solo DataFrame
+    df_features = df_ret_long.merge(df_var_long, on=['Fecha', 'Ticker'])
+    df_features = df_features.merge(df_cov_long, on=['Fecha', 'Ticker'])
+    
+    # Limpiar registros sin suficientes datos (NaNs de la ventana inicial)
+    df_features = df_features.dropna(subset=['Varianza_Activo', 'Covarianza_Mercado']).reset_index(drop=True)
+    
+    # Redondear para mayor legibilidad
+    df_features = df_features.round(6)
+    
+    return df_features
+
+
+# Extraer datos macroeconómicos de FRED (opcional, si se quiere enriquecer el dataset con indicadores macro)
+def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
+    """
+    Extrae datos macroeconómicos de FRED para una lista de indicadores y un rango de fechas.
+    """
+    if not fred_api_key:
+        print("Advertencia: No se ha proporcionado una clave API de FRED. No se podrán extraer datos macroeconómicos.")
+        return pd.DataFrame()
+    else:
+        # Fecha Inicial: fecha actual menos el periodo definido (ej. 4 años atrás)
+        fecha_final = datetime.now()
+        if periodo.endswith('y'):
+            anios = int(periodo[:-1])
+        else:
+            anios = 4
+
+        fecha_inicial = fecha_final.replace(year=fecha_final.year - anios)
+
+        fred = Fred(api_key=fred_api_key)
+        dfs_macro = []
+        for indicador in indicadores:
+            try:
+                df_indicador = fred.get_series(indicador, observation_start=fecha_inicial)
+                df_indicador = df_indicador.reset_index()
+                df_indicador.columns = ['Fecha', indicador]
+                dfs_macro.append(df_indicador)
+            except Exception as e:
+                print(f"Error extrayendo {indicador} de FRED: {e}")
+                continue
+        if dfs_macro:
+            # Establecer Fecha como índice para cada dataframe
+            for df in dfs_macro:
+                df.set_index('Fecha', inplace=True)
             
-        retornos_activo = df_retornos[ticker]
-        
-        # Calcular la Covarianza Móvil entre la acción y el mercado
-        covarianza_movil = retornos_activo.rolling(window=ventana_semanas).cov(retornos_mercado)
-        
-        # Calcular el Beta Móvil (Fórmula: Covarianza / Varianza)
-        beta_movil = covarianza_movil / varianza_mercado_movil
-        
-        # Estructurar los resultados de vuelta a formato de columnas
-        df_temp = pd.DataFrame({
-            'Fecha': df_retornos.index,
-            'Ticker': ticker,
-            'Beta': beta_movil
-        })
-        dfs_betas_historicos.append(df_temp)
-        
-    # 5. Concatenar todos los tickers
-    df_betas_final = pd.concat(dfs_betas_historicos, ignore_index=True)
-    
-    # Redondear para que quede limpio
-    df_betas_final['Beta'] = df_betas_final['Beta'].round(4)
-    
-    return df_betas_final
+            # Concatenar en axis=1 (columnas)
+            df_macro = pd.concat(dfs_macro, axis=1)
+            
+            # Eliminar columnas duplicadas (si las hay)
+            df_macro = df_macro.loc[:,~df_macro.columns.duplicated()]
+            
+            # Convertir a frecuencia mensual (último valor del mes)
+            df_macro = df_macro.resample('ME').last()
+            
+            # Eliminar filas completamente vacías
+            df_macro = df_macro.dropna(how='all')
+            
+            # Resetear índice para tener Fecha como columna
+            df_macro = df_macro.reset_index()
+            df_macro.columns.name = None
+            
+            return df_macro
+        else:
+            return pd.DataFrame()
 
 
 # Bloque principal para pruebas desde el terminal
 
 def main():
-    pass
+    # Prueba de extraer_datos_macro()
+    indicadores_prueba = ['FEDFUNDS', 'GS10', 'T10Y2Y', 'CPIAUCSL', 'UNRATE']
+    df_macro = extraer_datos_macro(indicadores_prueba)
+    print("Datos macroeconómicos extraídos de FRED:")
+    print(df_macro)
 
 if __name__ == "__main__":
     main()
