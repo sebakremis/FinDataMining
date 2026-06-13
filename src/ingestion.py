@@ -11,7 +11,6 @@ from src.config import periodo, intervalo
 from datetime import datetime
 
 
-
 def extraer_precios(tickers_list: list) -> pd.DataFrame:
     """
     Extrae precios históricos y formatea las fechas para cruzar con datos fundamentales.
@@ -54,16 +53,16 @@ def extraer_datos_fundamentales(tickers_list: list) -> pd.DataFrame:
     
     # Separamos las columnas según de qué reporte provienen
     cols_resultados = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income', 
-                   'EBITDA', 'Basic Average Shares'] 
+                       'EBITDA', 'Basic Average Shares'] 
 
     cols_balance = ['Cash And Cash Equivalents', 'Current Debt', 'Long Term Debt', 
-                'Total Debt', 'Stockholders Equity', 'Total Assets', 'Current Assets', 'Current Liabilities'] 
+                    'Total Debt', 'Stockholders Equity', 'Total Assets', 'Current Assets', 'Current Liabilities'] 
 
     for ticker in tickers_list:
         try:
             yf_ticker = yf.Ticker(ticker)
             
-            # 1. Extraer ambos reportes anuales
+            # Extraer reportes anuales
             fin = yf_ticker.financials
             bal = yf_ticker.balance_sheet
 
@@ -72,120 +71,49 @@ def extraer_datos_fundamentales(tickers_list: list) -> pd.DataFrame:
                 print(f"Sin datos financieros para {ticker}")
                 continue
 
-            # 2. Transponer y filtrar Estado de Resultados
+            # Transponer y filtrar Estado de Resultados
             df_fin = fin.T.reindex(columns=cols_resultados)
 
-            # 3. Transponer y filtrar Balance General (si existe)
+            # Transponer y filtrar Balance General (si existe)
             if bal is not None and not bal.empty:
                 df_bal = bal.T.reindex(columns=cols_balance)
-                # Unimos ambos reportes usando la fecha (que actualmente es el índice)
                 df_temp = df_fin.join(df_bal, how='left')
             else:
                 # Si no hay balance, nos quedamos con financials y llenamos el resto con nulos
-                df_temp = df_fin
+                df_temp = df_fin.copy() # Usamos .copy() para evitar SettingWithCopyWarning
                 for col in cols_balance:
-                    df_temp[col] = pd.NA
+                    df_temp[col] = float('nan') # Usar NaN nativo en lugar de pd.NA
+                
+                # Forzar que estas nuevas columnas nulas sean reconocidas como numéricas (float)
+                df_temp[cols_balance] = df_temp[cols_balance].astype(float)          
 
-            # 4. Limpieza del DataFrame temporal
+            # Limpieza del DataFrame temporal
             df_temp = df_temp.reset_index() # Pasamos la fecha del índice a una columna
             df_temp = df_temp.rename(columns={'index': 'Fecha'})
             df_temp['Ticker'] = ticker # Identificador del activo
-            
-            dfs_lista.append(df_temp)
+
+            # --- TRANSFORMACIÓN DE FECHAS (Regla de 60 días) ---
+            # Para evitar "Lookahead Bias", asumimos que la información fue pública 60 días después del cierre.
+            # Convertimos a datetime, sumamos los 60 días, y extraemos la fecha pura (.dt.date)
+            fechas_datetime = pd.to_datetime(df_temp['Fecha']).dt.tz_localize(None)
+            df_temp['Fecha'] = (fechas_datetime + pd.Timedelta(days=60)).dt.date
+
+            # Añadir a la lista solo si no está vacío
+            if not df_temp.empty:
+                dfs_lista.append(df_temp)
 
         except Exception as e:
             print(f"Error procesando fundamentales para {ticker}: {e}")
             continue
 
-    # 5. Concatenación final
+    # Concatenación final
     if dfs_lista:
         # ignore_index=True es clave aquí para tener un índice numérico limpio (0, 1, 2...)
         df_final = pd.concat(dfs_lista, axis=0, ignore_index=True)
-        # Opcional: Asegurar que la fecha tenga formato datetime
-        df_final['Fecha'] = pd.to_datetime(df_final['Fecha']).dt.tz_localize(None)
         return df_final
     else:
         return pd.DataFrame()
 
-
-def extraer_financials(tickers_list:list)->pd.DataFrame:
-    """
-    Extrae información financiera de una lista de tickers y devuelve un DataFrame con los datos seleccionados.
-    """
-    dfs_financials = []
-    columnas = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income']
-    for ticker in tickers_list:
-        try:
-            yf_ticker = yf.Ticker(ticker)
-            financials_data = yf_ticker.financials
-
-            # Validación
-            if financials_data is None or financials_data.empty:
-                print(f"Sin datos para {ticker}")
-                continue
-
-            df_temp = financials_data.T 
-            # df_temp = df_temp.iloc[[0]]  # Solo la última fila disponible
-            df_temp = df_temp.reindex(columns=columnas)
-            df_temp['Ticker'] = ticker
-
-            dfs_financials.append(df_temp)
-
-        except Exception as e:
-            print(f"Error fetching financials for {ticker}: {e}")
-            continue
-
-    if dfs_financials:
-        return pd.concat(dfs_financials, axis=0, ignore_index=False)
-    else:
-        return pd.DataFrame()
-
-
-def extraer_info(tickers_list:list)->pd.DataFrame:
-    """Extrae información fundamental, sin datos historicos."""
-    dfs_info = []
-
-    for ticker in tickers_list:
-        try:
-            yf_ticker = yf.Ticker(ticker)
-            info = yf_ticker.info   
-    
-            # Validación
-            if not isinstance(info, dict) or len(info) == 0:
-                print(f"Sin datos para {ticker}")
-                continue
-    
-            # Seleccionar campos
-            row = {
-                'Ticker': ticker,
-                'Sector': info.get('sector'),
-                'MarketCap': info.get('marketCap'),
-                'Beta': info.get('beta'),
-                'DividendYield': info.get('dividendYield'),
-                'ForwardPE': info.get('forwardPE'),
-                'trailingPegRatio': info.get('trailingPegRatio'),
-                'PriceToBook': info.get('priceToBook'),
-                'EnterpriseToEbitda': info.get('enterpriseToEbitda'),
-                'ReturnOnAssets': info.get('returnOnAssets'),
-                'returnOnEquity': info.get('returnOnEquity'),
-                'profitMargins': info.get('profitMargins'),
-                'operatingMargins': info.get('operatingMargins'),
-                'currentRatio': info.get('currentRatio'),
-                'debtToEquity': info.get('debtToEquity'),
-                'revenueGrowth': info.get('revenueGrowth'),
-                'shortPercentOfFloat': info.get('shortPercentOfFloat')
-            }
-    
-            dfs_info.append(row)
-    
-        except Exception as e:
-            print(f"Error con {ticker}: {e}")
-            continue
-    
-    if dfs_info:
-        return pd.DataFrame(dfs_info)
-    else:
-        return pd.DataFrame()
 
 # Cálculos de métricas financieras y ratios de valuación
 
@@ -234,6 +162,19 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
         
     if 'Current Assets' in df_metrics.columns and 'Current Liabilities' in df_metrics.columns:
         df_metrics['currentRatio'] = df_metrics['Current Assets'] / df_metrics['Current Liabilities']
+
+    # --- 5. RATIOS DE CRECIMIENTO ---
+    # Crecimiento interanual (Year-over-Year, YoY) - Ventana de 12 meses
+    # Se aplica .abs() en el denominador para corregir matemáticamente 
+    # la dirección del crecimiento si el periodo anterior era negativo.
+    if 'Total Revenue' in df_metrics.columns:
+        prev_rev_12 = df_metrics.groupby('Ticker')['Total Revenue'].shift(12)
+        df_metrics['Revenue_Growth_YoY'] = (df_metrics['Total Revenue'] - prev_rev_12) / prev_rev_12.abs()
+    
+    if 'EBITDA' in df_metrics.columns:
+        prev_ebitda_12 = df_metrics.groupby('Ticker')['EBITDA'].shift(12)
+        df_metrics['EBITDA_Growth_YoY'] = (df_metrics['EBITDA'] - prev_ebitda_12) / prev_ebitda_12.abs()
+
 
     # --- LIMPIEZA FINAL ---
     # Redondear para legibilidad y consistencia
@@ -349,14 +290,102 @@ def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
             return pd.DataFrame()
 
 
+# Funciones "legacy": no se utilizan en el código actual, las dejo por las dudas.
+
+def extraer_info(tickers_list:list)->pd.DataFrame:
+    """Extrae última información fundamental, sin datos historicos."""
+    dfs_info = []
+
+    for ticker in tickers_list:
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            info = yf_ticker.info   
+    
+            # Validación
+            if not isinstance(info, dict) or len(info) == 0:
+                print(f"Sin datos para {ticker}")
+                continue
+    
+            # Seleccionar campos
+            row = {
+                'Ticker': ticker,
+                'Sector': info.get('sector'),
+                'MarketCap': info.get('marketCap'),
+                'Beta': info.get('beta'),
+                'DividendYield': info.get('dividendYield'),
+                'ForwardPE': info.get('forwardPE'),
+                'trailingPegRatio': info.get('trailingPegRatio'),
+                'PriceToBook': info.get('priceToBook'),
+                'EnterpriseToEbitda': info.get('enterpriseToEbitda'),
+                'ReturnOnAssets': info.get('returnOnAssets'),
+                'returnOnEquity': info.get('returnOnEquity'),
+                'profitMargins': info.get('profitMargins'),
+                'operatingMargins': info.get('operatingMargins'),
+                'currentRatio': info.get('currentRatio'),
+                'debtToEquity': info.get('debtToEquity'),
+                'revenueGrowth': info.get('revenueGrowth'),
+                'shortPercentOfFloat': info.get('shortPercentOfFloat')
+            }
+    
+            dfs_info.append(row)
+    
+        except Exception as e:
+            print(f"Error con {ticker}: {e}")
+            continue
+    
+    if dfs_info:
+        return pd.DataFrame(dfs_info)
+    else:
+        return pd.DataFrame()
+
+
+def extraer_financials(tickers_list:list)->pd.DataFrame:
+    """
+    Extrae información financiera de una lista de tickers y devuelve un DataFrame con los datos seleccionados.
+    """
+    dfs_financials = []
+    columnas = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income']
+    for ticker in tickers_list:
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            financials_data = yf_ticker.financials
+
+            # Validación
+            if financials_data is None or financials_data.empty:
+                print(f"Sin datos para {ticker}")
+                continue
+
+            df_temp = financials_data.T 
+            # df_temp = df_temp.iloc[[0]]  # Solo la última fila disponible
+            df_temp = df_temp.reindex(columns=columnas)
+            df_temp['Ticker'] = ticker
+
+            dfs_financials.append(df_temp)
+
+        except Exception as e:
+            print(f"Error fetching financials for {ticker}: {e}")
+            continue
+
+    if dfs_financials:
+        return pd.concat(dfs_financials, axis=0, ignore_index=False)
+    else:
+        return pd.DataFrame()
+
+
 # Bloque principal para pruebas desde el terminal
+# ejecutar desde la raiz: python -m src.ingestion
 
 def main():
     # Prueba de extraer_datos_macro()
-    indicadores_prueba = ['FEDFUNDS', 'GS10', 'T10Y2Y', 'CPIAUCSL', 'UNRATE']
-    df_macro = extraer_datos_macro(indicadores_prueba)
-    print("Datos macroeconómicos extraídos de FRED:")
-    print(df_macro)
+    # indicadores_prueba = ['FEDFUNDS', 'GS10', 'T10Y2Y', 'CPIAUCSL', 'UNRATE']
+    # df_macro = extraer_datos_macro(indicadores_prueba)
+    # print("Datos macroeconómicos extraídos de FRED:")
+    # print(df_macro)
+
+    # Prueba de extraer_datos_fundamentales()
+    tickers_prueba = ["MSFT", "NVDA"]
+    df_fundamentals = extraer_datos_fundamentales(tickers_prueba)
+    df_fundamentals.to_csv("data/fundamentals_test.csv")
 
 if __name__ == "__main__":
     main()
