@@ -1,6 +1,6 @@
 # 🌲 FinDataMining
 
-> *"A not-so-random walk through the market forest"* 🚶‍♂️📉
+> *"A not-so-random walk through the market forest"*
 
 ### Pipeline automatizado de preparación de datos y modelado predictivo para ratios financieros del S&P 500.
 
