@@ -25,24 +25,25 @@ El flujo de trabajo está modularizado en tres fases principales desarrolladas e
 
 ```text
 FINDATAMINING/
-├── data/                    # Almacenamiento local de datasets y archivos de configuración
-│   ├── resultados/          # Sub-directorio para almacenar los resultados de la aplicación de modelos
-│   ├── constituents.csv     # Fichero de las acciones constituyentes del Indice S&P 500
-│   ├── raw_data.parquet     # Datos crudos generados por la fase de Extracción
-│   ├── clena_data.parquet   # Datos limpios generados en la fase Transform
-├── src/                     # Sub-directorio con los módulos de funciones auxiliares
-│   ├── __init__.py          # Fichero vacío, inicializa la carpeta como paquete
-│   ├── config.py            # Configuración global del proyecto
-│   ├── evaluators.py        # Funciones auxiliares reutilizables para las tareas de la fase `Modeling`
-│   ├── ingestion.py         # Funciones para la fase `Extract`
-│   └── preprocessing.py     # Funciones para la fase `Transform`
-├── .gitignore               # Reglas de git ignore
-├── 01_Extract.ipynb         # Cálculo de ratios fundamentales y exporta los resultados en formato parquet
-├── 02_Transform.ipynb       # Análisis Exploratorio de Datos (EDA) y preprocesamiento avanzado de variables
-├── 03_Modeling.ipynb        # Construcción, optimización y evaluación de modelos predictivos
-├── LICENSE                  # Licencia del proyecto
-├── README.md                # Descripción del proyecto
-└── requirements.txt         # Dependencias necesarias
+├── data/                       # Almacenamiento local de datasets y archivos de configuración
+│   ├── resultados/             # Sub-directorio para almacenar los resultados de la aplicación de modelos
+│   ├── constituents.csv        # Fichero de las acciones constituyentes del Indice S&P 500
+│   ├── raw_data.parquet        # Datos crudos generados por la fase de Extracción
+│   ├── clena_data.parquet      # Datos limpios generados en la fase Transform
+├── src/                        # Sub-directorio con los módulos de funciones auxiliares
+│   ├── __init__.py             # Fichero vacío, inicializa la carpeta como paquete
+│   ├── config.py               # Configuración global del proyecto #data_sources.example.py
+│   ├── data_sources.example.py # Fichero ejemplo para gestionar la clave API de FRED.
+│   ├── evaluators.py           # Funciones auxiliares reutilizables para las tareas de la fase `Modeling`
+│   ├── ingestion.py            # Funciones para la fase `Extract`
+│   └── preprocessing.py        # Funciones para la fase `Transform`
+├── .gitignore                  # Reglas de git ignore
+├── 01_Extract.ipynb            # Cálculo de ratios fundamentales y exporta los resultados en formato parquet
+├── 02_Transform.ipynb          # Análisis Exploratorio de Datos (EDA) y preprocesamiento avanzado de variables
+├── 03_Modeling.ipynb           # Construcción, optimización y evaluación de modelos predictivos
+├── LICENSE                     # Licencia del proyecto
+├── README.md                   # Descripción del proyecto
+└── requirements.txt            # Dependencias necesarias
 ```
 
 ## 📊 Dataset y Variables
@@ -51,6 +52,22 @@ El universo de datos se define a partir de los componentes oficiales del S&P 500
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Beta`, `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to Equity`, `EnterpriseValue`, entre otras.
 * **Variables objetivo (Targets):** Ratios de valuación de mercado analizados de forma independiente (`PriceToBook`, `PE_Trailing`, `EnterpriseToEbitda`), permitiendo configurar el pipeline para predecir cualquiera de ellos de manera paramétrica durante la fase de modelado.
+
+## 🔑 Datos Macroeconómicos (API de FRED)
+
+El pipeline de extracción de datos está preparado para enriquecer automáticamente el dataset con indicadores macroeconómicos clave (como tipos de interés, inflación, liquidez, etc.) consumiendo la API de *Federal Reserve Economic Data* (FRED).
+
+**Esta integración es de carácter opcional.**
+
+* **Si decides configurarla:** El dataset resultante incluirá las *features* macroeconómicas detalladas en el proyecto.
+* **Si decides omitirla:** El proceso ETL se ejecutará sin errores, pero el dataset final simplemente tendrá menos columnas (sin los indicadores macroeconómicos).
+
+### Instrucciones de configuración:
+
+1. Solicita una clave API de forma **100% gratuita** creando una cuenta en la página oficial: [fred.stlouisfed.org](https://fred.stlouisfed.org/).
+2. Una vez generada tu *API Key*, localiza el archivo `data_sources.example.py` en este repositorio.
+3. Abre el archivo y sigue las breves instrucciones detalladas en su interior para guardar tu clave y activar la descarga de esta dimensión de datos.
+
 
 ## 🚀 Requisitos e Instalación
 
