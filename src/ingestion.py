@@ -164,16 +164,22 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
         df_metrics['currentRatio'] = df_metrics['Current Assets'] / df_metrics['Current Liabilities']
 
     # --- 5. RATIOS DE CRECIMIENTO ---
-    # Crecimiento interanual (Year-over-Year, YoY) - Ventana de 12 meses
+    # Crecimiento interanual (Year-over-Year, YoY) - Ventana de 12 meses y Trimestral (QoQ)
     # Se aplica .abs() en el denominador para corregir matemáticamente 
     # la dirección del crecimiento si el periodo anterior era negativo.
     if 'Total Revenue' in df_metrics.columns:
         prev_rev_12 = df_metrics.groupby('Ticker')['Total Revenue'].shift(12)
         df_metrics['Revenue_Growth_YoY'] = (df_metrics['Total Revenue'] - prev_rev_12) / prev_rev_12.abs()
+
+        prev_rev_3 = df_metrics.groupby('Ticker')['Total Revenue'].shift(3)
+        df_metrics['Revenue_Growth_QoQ'] = (df_metrics['Total Revenue'] - prev_rev_3) / prev_rev_3.abs()
     
     if 'EBITDA' in df_metrics.columns:
         prev_ebitda_12 = df_metrics.groupby('Ticker')['EBITDA'].shift(12)
         df_metrics['EBITDA_Growth_YoY'] = (df_metrics['EBITDA'] - prev_ebitda_12) / prev_ebitda_12.abs()
+
+        prev_ebitda_3 = df_metrics.groupby('Ticker')['EBITDA'].shift(3)
+        df_metrics['EBITDA_Growth_QoQ'] = (df_metrics['EBITDA'] - prev_ebitda_3) / prev_ebitda_3.abs()
 
 
     # --- LIMPIEZA FINAL ---
