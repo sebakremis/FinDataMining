@@ -173,31 +173,31 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     # la dirección del crecimiento si el periodo anterior era negativo.
     if 'Total Revenue' in df_metrics.columns:
         prev_rev_12 = df_metrics.groupby('Ticker')['Total Revenue'].shift(12)
-        df_metrics['Revenue_Growth_YoY'] = (df_metrics['Total Revenue'] - prev_rev_12) / prev_rev_12.abs()
+        df_metrics['Revenue_YoY'] = (df_metrics['Total Revenue'] - prev_rev_12) / prev_rev_12.abs()
 
         prev_rev_3 = df_metrics.groupby('Ticker')['Total Revenue'].shift(3)
-        df_metrics['Revenue_Growth_QoQ'] = (df_metrics['Total Revenue'] - prev_rev_3) / prev_rev_3.abs()
+        df_metrics['Revenue_QoQ'] = (df_metrics['Total Revenue'] - prev_rev_3) / prev_rev_3.abs()
     
     if 'EBITDA' in df_metrics.columns:
         prev_ebitda_12 = df_metrics.groupby('Ticker')['EBITDA'].shift(12)
-        df_metrics['EBITDA_Growth_YoY'] = (df_metrics['EBITDA'] - prev_ebitda_12) / prev_ebitda_12.abs()
+        df_metrics['EBITDA_YoY'] = (df_metrics['EBITDA'] - prev_ebitda_12) / prev_ebitda_12.abs()
 
         prev_ebitda_3 = df_metrics.groupby('Ticker')['EBITDA'].shift(3)
-        df_metrics['EBITDA_Growth_QoQ'] = (df_metrics['EBITDA'] - prev_ebitda_3) / prev_ebitda_3.abs()
+        df_metrics['EBITDA_QoQ'] = (df_metrics['EBITDA'] - prev_ebitda_3) / prev_ebitda_3.abs()
     
     if 'Free Cash Flow' in df_metrics.columns:
         prev_FCF_12 = df_metrics.groupby('Ticker')['Free Cash Flow'].shift(12)
-        df_metrics['FCF_Growth_YoY'] = (df_metrics['Free Cash Flow'] - prev_FCF_12) / prev_FCF_12.abs()
+        df_metrics['FCF_YoY'] = (df_metrics['Free Cash Flow'] - prev_FCF_12) / prev_FCF_12.abs()
 
         prev_FCF_3 = df_metrics.groupby('Ticker')['Free Cash Flow'].shift(3)
-        df_metrics['FCF_Growth_QoQ'] = (df_metrics['Free Cash Flow'] - prev_FCF_3) / prev_FCF_3.abs()
+        df_metrics['FCF_QoQ'] = (df_metrics['Free Cash Flow'] - prev_FCF_3) / prev_FCF_3.abs()
 
     if 'Capital Expenditure' in df_metrics.columns:
         prev_Capex_12 = df_metrics.groupby('Ticker')['Capital Expenditure'].shift(12)
-        df_metrics['Capex_Growth_YoY'] = (df_metrics['Capital Expenditure'] - prev_Capex_12) / prev_Capex_12.abs()
+        df_metrics['Capex_YoY'] = (df_metrics['Capital Expenditure'] - prev_Capex_12) / prev_Capex_12.abs()
 
         prev_Capex_3 = df_metrics.groupby('Ticker')['Capital Expenditure'].shift(3)
-        df_metrics['Capex_Growth_QoQ'] = (df_metrics['Capital Expenditure'] - prev_Capex_3) / prev_Capex_3.abs()
+        df_metrics['Capex_QoQ'] = (df_metrics['Capital Expenditure'] - prev_Capex_3) / prev_Capex_3.abs()
 
     # --- LIMPIEZA FINAL ---
     # Redondear para legibilidad y consistencia
@@ -311,6 +311,19 @@ def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
             return df_macro
         else:
             return pd.DataFrame()
+
+
+def calcular_growth_features(df:pd.DataFrame, cols:list)->pd.DataFrame:
+    for col in cols:
+        try:
+            df[f'{col}_QoQ'] = df[col].pct_change(3, fill_method=None)
+            df[f'{col}_YoY'] = df[col].pct_change(12, fill_method=None)
+            
+        except Exception as e:
+            print(f"Error procesando la columna {col}: {e}")
+            continue
+    
+    return df
 
 
 # Función "legacy": no se utiliza en el código actual, la dejo por las dudas.

@@ -3,6 +3,7 @@
 Módulo de funciones para la fase de Evaluación de Modelos (Modeling).
 """
 import numpy as np
+import pandas as pd
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 def obtener_metricas(y_real, y_pred, nombre_modelo):
@@ -20,10 +21,22 @@ def obtener_metricas(y_real, y_pred, nombre_modelo):
         'R2': r2_score(y_real, y_pred)
     }
 
-# Bloque principal para pruebas desde el terminal
 
-def main():
-    pass
+def calcular_acceleration_features(df:pd.DataFrame, cols:list, reemplazar:bool= False)-> pd.DataFrame:
+    for col in cols:
+        try:
+            # Se extrae el nombre de la variable
+            feature_name = col.split('_')[0]
 
-if __name__ == "__main__":
-    main()
+            # Calcular Acceleration: se define como la tasa de cambio a corto plazo menos la de largo.
+            df[f'{feature_name}_Acceleration'] = df[f'{feature_name}_QoQ'] - df[f'{feature_name}_YoY']
+
+            if reemplazar:
+                # Se elimina la columna trimestral
+                df = df.drop(f'{feature_name}_QoQ', axis=1)           
+
+        except Exception as e:
+            print(f"Error procesando columna {col}: {e}")
+            continue
+
+    return df
