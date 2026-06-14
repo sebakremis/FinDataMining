@@ -2,12 +2,11 @@
 src/ingestion.py
 Módulo de funciones para la fase de Ingestión de Datos (Extract).
 """
-
 import pandas as pd
 import yfinance as yf
 from fredapi import Fred
 from src.data_sources import fred_api_key
-from src.config import periodo, intervalo
+from src.config import periodo, intervalo, cols_resultados, cols_balance, cols_cashflow
 from datetime import datetime
 
 
@@ -44,19 +43,12 @@ def extraer_precios(tickers_list: list) -> pd.DataFrame:
     return df_prices
 
 
-def extraer_datos_fundamentales(tickers_list: list) -> pd.DataFrame:
+def extraer_financials(tickers_list: list) -> pd.DataFrame:
     """
-    Extrae el Estado de Resultados y el Balance General de una lista de tickers,
-    y devuelve un DataFrame unificado ideal para cálculo de ratios históricos.
+    Extrae datos financieros del Estado de Resultados, Balance General y Cash Flow,
+    devuelve un DataFrame unificado para cálculo de ratios históricos.
     """
-    dfs_lista = []
-    
-    # Separamos las columnas según de qué reporte provienen
-    cols_resultados = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income', 
-                       'EBITDA', 'Basic Average Shares'] 
-
-    cols_balance = ['Cash And Cash Equivalents', 'Current Debt', 'Long Term Debt', 
-                    'Total Debt', 'Stockholders Equity', 'Total Assets', 'Current Assets', 'Current Liabilities'] 
+    dfs_lista = []       
 
     for ticker in tickers_list:
         try:
@@ -65,6 +57,7 @@ def extraer_datos_fundamentales(tickers_list: list) -> pd.DataFrame:
             # Extraer reportes anuales
             fin = yf_ticker.financials
             bal = yf_ticker.balance_sheet
+            cf = yf_ticker.cashflow
 
             # Validación del Estado de Resultados
             if fin is None or fin.empty:
@@ -74,7 +67,7 @@ def extraer_datos_fundamentales(tickers_list: list) -> pd.DataFrame:
             # Transponer y filtrar Estado de Resultados
             df_fin = fin.T.reindex(columns=cols_resultados)
 
-            # Transponer y filtrar Balance General (si existe)
+            # Validación del Balance General (si existe)
             if bal is not None and not bal.empty:
                 df_bal = bal.T.reindex(columns=cols_balance)
                 df_temp = df_fin.join(df_bal, how='left')
@@ -85,7 +78,18 @@ def extraer_datos_fundamentales(tickers_list: list) -> pd.DataFrame:
                     df_temp[col] = float('nan') # Usar NaN nativo en lugar de pd.NA
                 
                 # Forzar que estas nuevas columnas nulas sean reconocidas como numéricas (float)
-                df_temp[cols_balance] = df_temp[cols_balance].astype(float)          
+                df_temp[cols_balance] = df_temp[cols_balance].astype(float)  
+
+            # Validación del Cash Flow (si existe)
+            if cf is not None and not cf.empty:
+                df_cf = cf.T.reindex(columns=cols_cashflow)
+                # Unimos a df_temp usando el índice (Fecha)
+                df_temp = df_temp.join(df_cf, how='left')
+            else:
+                # Fallback si no hay datos de Cash Flow
+                for col in cols_cashflow:
+                    df_temp[col] = float('nan')
+                df_temp[cols_cashflow] = df_temp[cols_cashflow].astype(float)        
 
             # Limpieza del DataFrame temporal
             df_temp = df_temp.reset_index() # Pasamos la fecha del índice a una columna
@@ -180,7 +184,20 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
 
         prev_ebitda_3 = df_metrics.groupby('Ticker')['EBITDA'].shift(3)
         df_metrics['EBITDA_Growth_QoQ'] = (df_metrics['EBITDA'] - prev_ebitda_3) / prev_ebitda_3.abs()
+    
+    if 'Free Cash Flow' in df_metrics.columns:
+        prev_FCF_12 = df_metrics.groupby('Ticker')['Free Cash Flow'].shift(12)
+        df_metrics['FCF_Growth_YoY'] = (df_metrics['Free Cash Flow'] - prev_FCF_12) / prev_FCF_12.abs()
 
+        prev_FCF_3 = df_metrics.groupby('Ticker')['Free Cash Flow'].shift(3)
+        df_metrics['FCF_Growth_QoQ'] = (df_metrics['Free Cash Flow'] - prev_FCF_3) / prev_FCF_3.abs()
+
+    if 'Capital Expenditure' in df_metrics.columns:
+        prev_Capex_12 = df_metrics.groupby('Ticker')['Capital Expenditure'].shift(12)
+        df_metrics['Capex_Growth_YoY'] = (df_metrics['Capital Expenditure'] - prev_Capex_12) / prev_Capex_12.abs()
+
+        prev_Capex_3 = df_metrics.groupby('Ticker')['Capital Expenditure'].shift(3)
+        df_metrics['Capex_Growth_QoQ'] = (df_metrics['Capital Expenditure'] - prev_Capex_3) / prev_Capex_3.abs()
 
     # --- LIMPIEZA FINAL ---
     # Redondear para legibilidad y consistencia
@@ -296,7 +313,7 @@ def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
             return pd.DataFrame()
 
 
-# Funciones "legacy": no se utilizan en el código actual, las dejo por las dudas.
+# Función "legacy": no se utiliza en el código actual, la dejo por las dudas.
 
 def extraer_info(tickers_list:list)->pd.DataFrame:
     """Extrae última información fundamental, sin datos historicos."""
@@ -341,39 +358,6 @@ def extraer_info(tickers_list:list)->pd.DataFrame:
     
     if dfs_info:
         return pd.DataFrame(dfs_info)
-    else:
-        return pd.DataFrame()
-
-
-def extraer_financials(tickers_list:list)->pd.DataFrame:
-    """
-    Extrae información financiera de una lista de tickers y devuelve un DataFrame con los datos seleccionados.
-    """
-    dfs_financials = []
-    columnas = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income']
-    for ticker in tickers_list:
-        try:
-            yf_ticker = yf.Ticker(ticker)
-            financials_data = yf_ticker.financials
-
-            # Validación
-            if financials_data is None or financials_data.empty:
-                print(f"Sin datos para {ticker}")
-                continue
-
-            df_temp = financials_data.T 
-            # df_temp = df_temp.iloc[[0]]  # Solo la última fila disponible
-            df_temp = df_temp.reindex(columns=columnas)
-            df_temp['Ticker'] = ticker
-
-            dfs_financials.append(df_temp)
-
-        except Exception as e:
-            print(f"Error fetching financials for {ticker}: {e}")
-            continue
-
-    if dfs_financials:
-        return pd.concat(dfs_financials, axis=0, ignore_index=False)
     else:
         return pd.DataFrame()
 
