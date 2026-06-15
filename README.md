@@ -9,7 +9,7 @@
 
 ---
 
-Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) automatizado para construir un dataset financiero exhaustivo a partir de las acciones constituyentes del índice S&P 500. El flujo utiliza fuentes de datos de acceso libre y gratuito, principalmente a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en balances corporativos e históricos de precios. Una vez procesado, normalizado y limpio, el dataset se utiliza en la fase de modelado predictivo para entrenar algoritmos de Machine Learning orientados a la estimación de múltiples ratios de valuación.
+Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) automatizado para construir un dataset financiero exhaustivo a partir de las acciones constituyentes del índice S&P 500. El flujo utiliza fuentes de datos de acceso libre y gratuito, principalmente a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en balances corporativos e históricos de precios. Una vez procesado, normalizado y limpio, el dataset se utiliza en la fase de modelado predictivo para entrenar algoritmos de Machine Learning orientados a la estimación de precios.
 
 ## 🚧 Estado del Proyecto
 
@@ -31,7 +31,7 @@ FINDATAMINING/
 ├── src/                        # Sub-directorio con los módulos de funciones auxiliares
 │   ├── __init__.py             # Fichero vacío, inicializa la carpeta como paquete
 │   ├── config.py               # Configuración global del proyecto #data_sources.example.py
-│   ├── data_sources.example.py # Fichero ejemplo para gestionar la clave API de FRED.
+│   ├── data_sources.example.py # Fichero ejemplo para gestionar la clave API de FRED (ya no se utiliza en la versión actual) 
 │   ├── evaluators.py           # Funciones auxiliares reutilizables para las tareas de la fase `Modeling`
 │   ├── ingestion.py            # Funciones para la fase `Extract`
 │   └── preprocessing.py        # Funciones para la fase `Transform`
@@ -48,23 +48,8 @@ FINDATAMINING/
 
 El universo de datos se define a partir de los componentes oficiales del S&P 500 provistos en `constituents.csv`. Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
-* **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Beta`, `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to Equity`, `EnterpriseValue`, entre otras.
-* **Variables objetivo (Targets):** Ratios de valuación de mercado analizados de forma independiente (`PriceToBook`, `PE_Trailing`, `EnterpriseToEbitda`), permitiendo configurar el pipeline para predecir cualquiera de ellos de manera paramétrica durante la fase de modelado.
-
-## 🔑 Datos Macroeconómicos (API de FRED)
-
-El pipeline de extracción de datos está preparado para enriquecer automáticamente el dataset con indicadores macroeconómicos clave (como tipos de interés, inflación, liquidez, etc.) consumiendo la API de *Federal Reserve Economic Data* (FRED).
-
-**Esta integración es de carácter opcional.**
-
-* **Si decides configurarla:** El dataset resultante incluirá las *features* macroeconómicas detalladas en el proyecto.
-* **Si decides omitirla:** El proceso ETL se ejecutará sin errores, pero el dataset final simplemente tendrá menos columnas (sin los indicadores macroeconómicos).
-
-### Instrucciones de configuración:
-
-1. Solicita una clave API de forma **100% gratuita** creando una cuenta en la página oficial: [fred.stlouisfed.org](https://fred.stlouisfed.org/).
-2. Una vez generada tu *API Key*, localiza el archivo `data_sources.example.py` en este repositorio.
-3. Abre el archivo y sigue las breves instrucciones detalladas en su interior para guardar tu clave y activar la descarga de esta dimensión de datos.
+* **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
+* **Variable objetivo (Target):** El logaritmo del precio de cierre mensual.
 
 
 ## 🚀 Requisitos e Instalación
