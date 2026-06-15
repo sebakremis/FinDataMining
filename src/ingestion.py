@@ -3,6 +3,7 @@ src/ingestion.py
 Módulo de funciones para la fase de Ingestión de Datos (Extract).
 """
 import pandas as pd
+import numpy as np
 import yfinance as yf
 from fredapi import Fred
 from src.data_sources import fred_api_key
@@ -129,7 +130,7 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     # Trabajamos sobre una copia para no alterar el original inadvertidamente
     df_metrics = df.copy()
 
-    # --- 1. DATOS BASE ---
+    # Datos Base
     if 'Basic Average Shares' in df_metrics.columns:
         df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['Basic Average Shares']
     else:
@@ -143,14 +144,14 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     efectivo = df_metrics['Cash And Cash Equivalents'].fillna(0)
     df_metrics['EnterpriseValue'] = df_metrics['MarketCap'] + deuda_total - efectivo
 
-    # --- 2. RATIOS DE VALORACIÓN (Mercado vs Contabilidad) ---
+    # Ratios de valuación
     df_metrics['PE_Trailing'] = df_metrics['MarketCap'] / df_metrics['Net Income']
     df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / df_metrics['EBITDA']
     
     if 'Stockholders Equity' in df_metrics.columns:
         df_metrics['PriceToBook'] = df_metrics['MarketCap'] / df_metrics['Stockholders Equity']
 
-    # --- 3. RATIOS DE RENTABILIDAD Y MÁRGENES ---
+    # Ratios de rentabilidad y márgenes
     df_metrics['operatingMargins'] = df_metrics['Operating Income'] / df_metrics['Total Revenue']
     df_metrics['profitMargins'] = df_metrics['Net Income'] / df_metrics['Total Revenue']
     
@@ -160,14 +161,15 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     if 'Total Assets' in df_metrics.columns:
         df_metrics['ReturnOnAssets'] = df_metrics['Net Income'] / df_metrics['Total Assets']
 
-    # --- 4. RATIOS DE LIQUIDEZ Y SOLVENCIA ---
+    # Ratios de liquidez y solvencia
     if 'Stockholders Equity' in df_metrics.columns:
         df_metrics['debtToEquity'] = deuda_total / df_metrics['Stockholders Equity']
         
     if 'Current Assets' in df_metrics.columns and 'Current Liabilities' in df_metrics.columns:
         df_metrics['currentRatio'] = df_metrics['Current Assets'] / df_metrics['Current Liabilities']
+       
 
-    # --- 5. RATIOS DE CRECIMIENTO ---
+    # Ratios de crecimiento
     # Crecimiento interanual (Year-over-Year, YoY) - Ventana de 12 meses y Trimestral (QoQ)
     # Se aplica .abs() en el denominador para corregir matemáticamente 
     # la dirección del crecimiento si el periodo anterior era negativo.
@@ -199,7 +201,23 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
         prev_Capex_3 = df_metrics.groupby('Ticker')['Capital Expenditure'].shift(3)
         df_metrics['Capex_QoQ'] = (df_metrics['Capital Expenditure'] - prev_Capex_3) / prev_Capex_3.abs()
 
-    # --- LIMPIEZA FINAL ---
+    # Nuevas columnas
+    # Apalancamiento
+    # Se añade un pequeño epsilon (1e-6) al denominador para evitar divisiones por cero
+    df_metrics['NetDebt_to_EBITDA'] = (deuda_total - df_metrics['Cash And Cash Equivalents']) / (df_metrics['EBITDA'] + 1e-6)
+
+    # Free Cash Flow Conversion
+    df_metrics['FCF_to_EBITDA'] = df_metrics['Free Cash Flow'] / (df_metrics['EBITDA'] + 1e-6)
+
+    # Capital Intensity (Intensidad de capital)
+    # Usamos np.abs porque el Capex suele reportarse en negativo en los estados de flujo de caja
+    df_metrics['Capex_to_Revenue'] = np.abs(df_metrics['Capital Expenditure']) / (df_metrics['Total Revenue'] + 1e-6)
+    
+    # Limpieza de posibles infinitos creados por EBITDAs muy cercanos a cero
+    cols_nuevas = ['NetDebt_to_EBITDA', 'FCF_to_EBITDA', 'Capex_to_Revenue']
+    df_metrics[cols_nuevas] = df_metrics[cols_nuevas].replace([np.inf, -np.inf], np.nan)
+
+    # Limpieza final
     # Redondear para legibilidad y consistencia
     cols_a_redondear = [
         'PE_Trailing', 'PriceToBook', 'EnterpriseToEbitda', 'operatingMargins', 
@@ -385,9 +403,9 @@ def main():
     # print("Datos macroeconómicos extraídos de FRED:")
     # print(df_macro)
 
-    # Prueba de extraer_datos_fundamentales()
+    # Prueba de extraer_financials()
     tickers_prueba = ["MSFT", "NVDA"]
-    df_fundamentals = extraer_datos_fundamentales(tickers_prueba)
+    df_fundamentals = extraer_financials(tickers_prueba)
     df_fundamentals.to_csv("data/fundamentals_test.csv")
 
 if __name__ == "__main__":

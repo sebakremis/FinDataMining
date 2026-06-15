@@ -1,7 +1,5 @@
 # 🌲 FinDataMining
 
-> *"A not-so-random walk through the market forest"*
-
 ### Pipeline automatizado de preparación de datos y modelado predictivo para ratios financieros del S&P 500.
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)
