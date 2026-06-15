@@ -4,11 +4,38 @@ Módulo de funciones para la fase de Transformación de Datos (Transform).
 """
 
 import numpy as np
+import pandas as pd
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
+
+def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
+    # Agrupar y calcular la suma total del mercado por fecha
+    df['Total_Market_Assets'] = df.groupby('Date')['TotalAssets'].transform('sum')
+    df['Total_Market_Revenue'] = df.groupby('Date')['TotalRevenue'].transform('sum')
     
+    # Dividir los valores individuales por el total del mercado
+    df['RelativeAssets'] = df['TotalAssets'] / df['Total_Market_Assets']
+    df['RelativeRevenue'] = df['TotalRevenue'] / df['Total_Market_Revenue']
+
+    df.drop(columns=['Total_Market_Assets', 'Total_Market_Revenue'], inplace=True)
+
+    # Relative Equity Size: deben acotarse valores negativos a cero
+    equity_acotado = df['TotalEquity'].clip(lower=0)
+    
+    # Se agrupa la serie acotada pasándole la columna de fechas del DataFrame
+    total_market_equity = equity_acotado.groupby(df['Date']).transform('sum')
+    
+    df['RelativeEquity'] = np.where(
+        total_market_equity > 0,
+        equity_acotado / total_market_equity,
+        0.0
+    )
+    
+    return df
+
+
 def gestiona_outliers(col,clas = 'check'):
      """
      Función para detectar y gestionar outliers en una columna numérica.
