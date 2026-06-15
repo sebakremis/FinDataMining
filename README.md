@@ -1,6 +1,6 @@
 # 🌲 FinDataMining
 
-### Pipeline automatizado de preparación de datos y modelado predictivo para ratios financieros del S&P 500.
+### Pipeline de preparación de datos financieros para el modelado predictivo.
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)
 ![Machine Learning](https://img.shields.io/badge/Machine%20Learning-Regression-orange)
@@ -9,7 +9,9 @@
 
 ---
 
-Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) automatizado para construir un dataset financiero exhaustivo a partir de las acciones constituyentes del índice S&P 500. El flujo utiliza fuentes de datos de acceso libre y gratuito, principalmente a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en balances corporativos e históricos de precios. Una vez procesado, normalizado y limpio, el dataset se utiliza en la fase de modelado predictivo para entrenar algoritmos de Machine Learning orientados a la estimación de precios.
+Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) automatizado para construir un dataset financiero exhaustivo a partir de las acciones constituyentes del índice S&P 500. El flujo utiliza fuentes de datos de acceso libre y gratuito, principalmente a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en balances corporativos. Una vez procesado, normalizado y limpio, el dataset se utiliza en la fase de modelado predictivo para entrenar algoritmos de Machine Learning orientados a la estimación de precios.
+
+El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de RandomForest que arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
 
 ## 🚧 Estado del Proyecto
 
@@ -49,7 +51,7 @@ FINDATAMINING/
 El universo de datos se define a partir de los componentes oficiales del S&P 500 provistos en `constituents.csv`. Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** El logaritmo del precio de cierre mensual.
+* **Variable objetivo (Target):** El modelo base predice sobre el logarítmo de los precios de cierre mensual. Puedes experimentar utilizando como target alguno de los ratios de valuación que se incluyen en el dataset, tal como el `EnterpriseToEbitda`.
 
 
 ## 🚀 Requisitos e Instalación
@@ -59,6 +61,8 @@ El universo de datos se define a partir de los componentes oficiales del S&P 500
    git clone https://github.com/sebakremis/FinDataMining.git
    cd FinDataMining
    ```
+
+* Antes de instalar las librerías, se recomienda crear un entorno virtual específico para trabajar con *shap*, porque requiere de una versión antigüa de *numpy*.
 
 2. Instala el entorno de dependencias requerido utilizando `pip`:
    ```bash

@@ -276,6 +276,8 @@ def calcular_retornos(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana:
     return df_features
 
 
+# Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
+
 # Extraer datos macroeconómicos de FRED (opcional, si se quiere enriquecer el dataset con indicadores macro)
 def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
     """
@@ -344,7 +346,6 @@ def calcular_growth_features(df:pd.DataFrame, cols:list)->pd.DataFrame:
     return df
 
 
-# Función "legacy": no se utiliza en el código actual, la dejo por las dudas.
 
 def extraer_info(tickers_list:list)->pd.DataFrame:
     """Extrae última información fundamental, sin datos historicos."""
