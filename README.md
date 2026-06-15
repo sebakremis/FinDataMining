@@ -1,17 +1,13 @@
-# 🌲 FinDataMining
-
-### Pipeline de preparación de datos financieros para el modelado predictivo.
+# 📊 FinDataMining
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)
 ![Machine Learning](https://img.shields.io/badge/Machine%20Learning-Regression-orange)
 ![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-Pipeline-green)
 ![UCM](https://img.shields.io/badge/UCM-Máster_Data_Science-8b0000.svg)
 
----
+Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre las acciones constituyentes del índice S&P 500. Se utilizan fuentes de datos de acceso libre y gratuito, a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en los balances corporativos. Una vez procesado, normalizado y limpio, el dataset se utiliza en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
 
-Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) automatizado para construir un dataset financiero exhaustivo a partir de las acciones constituyentes del índice S&P 500. El flujo utiliza fuentes de datos de acceso libre y gratuito, principalmente a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en balances corporativos. Una vez procesado, normalizado y limpio, el dataset se utiliza en la fase de modelado predictivo para entrenar algoritmos de Machine Learning orientados a la estimación de precios.
-
-El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de RandomForest que arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
+El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
 
 ## 🚧 Estado del Proyecto
 
