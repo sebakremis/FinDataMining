@@ -1,4 +1,4 @@
-# src/evaluators.py
+# src/funcionesModeling.py
 """
 Módulo de funciones para la fase de Evaluación de Modelos (Modeling).
 """

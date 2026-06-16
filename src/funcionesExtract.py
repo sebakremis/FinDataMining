@@ -1,12 +1,10 @@
 """
-src/ingestion.py
+src/funcionesExtract.py
 Módulo de funciones para la fase de Ingestión de Datos (Extract).
 """
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from fredapi import Fred
-from src.data_sources import fred_api_key
 from src.config import periodo, intervalo, cols_resultados, cols_balance, cols_cashflow
 from datetime import datetime
 
@@ -278,6 +276,9 @@ def calcular_retornos(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana:
 
 # Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
 
+'''
+from fredapi import Fred
+from src.data_sources import fred_api_key
 # Extraer datos macroeconómicos de FRED (opcional, si se quiere enriquecer el dataset con indicadores macro)
 def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
     """
@@ -392,7 +393,7 @@ def extraer_info(tickers_list:list)->pd.DataFrame:
         return pd.DataFrame(dfs_info)
     else:
         return pd.DataFrame()
-
+'''
 
 # Bloque principal para pruebas desde el terminal
 # ejecutar desde la raiz: python -m src.ingestion

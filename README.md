@@ -30,9 +30,9 @@ FINDATAMINING/
 │   ├── __init__.py             # Fichero vacío, inicializa la carpeta como paquete
 │   ├── config.py               # Configuración global del proyecto #data_sources.example.py
 │   ├── data_sources.example.py # Fichero ejemplo para gestionar la clave API de FRED (ya no se utiliza en la versión actual) 
-│   ├── evaluators.py           # Funciones auxiliares reutilizables para las tareas de la fase `Modeling`
-│   ├── ingestion.py            # Funciones para la fase `Extract`
-│   └── preprocessing.py        # Funciones para la fase `Transform`
+│   ├── funcionesExtract.py     # Funciones auxiliares reutilizables para las tareas de la fase `Extract`
+│   ├── funcionesModeling.py    # Funciones para la fase `Modeling`
+│   └── funcionesTransform.py   # Funciones para la fase `Transform`
 ├── .gitignore                  # Reglas de git ignore
 ├── 01_Extract.ipynb            # Cálculo de ratios fundamentales y exporta los resultados en formato parquet
 ├── 02_Transform.ipynb          # Análisis Exploratorio de Datos (EDA) y preprocesamiento avanzado de variables
