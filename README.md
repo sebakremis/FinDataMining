@@ -22,10 +22,10 @@ El flujo de trabajo está modularizado en tres fases principales desarrolladas e
 ```text
 FINDATAMINING/
 ├── data/                       # Almacenamiento local de datasets y archivos de configuración
-│   ├── resultados/             # Sub-directorio para almacenar los resultados de la aplicación de modelos
+│   ├── results/                # Sub-directorio para almacenar los reportes generados luego de modelar
 │   ├── constituents.csv        # Fichero de las acciones constituyentes del Indice S&P 500
 │   ├── raw_data.parquet        # Datos crudos generados por la fase de Extracción
-│   ├── clena_data.parquet      # Datos limpios generados en la fase Transform
+│   ├── clean_data.parquet      # Datos limpios generados en la fase Transform
 ├── src/                        # Sub-directorio con los módulos de funciones auxiliares
 │   ├── __init__.py             # Fichero vacío, inicializa la carpeta como paquete
 │   ├── config.py               # Configuración global del proyecto #data_sources.example.py

@@ -7,7 +7,26 @@ import numpy as np
 import yfinance as yf
 from src.config import periodo, intervalo, cols_resultados, cols_balance, cols_cashflow
 from datetime import datetime
+import urllib.request
+import os
 
+def descargar_constituents(data_folder="data", force_update=False):
+    """
+    Descarga el listado de componentes del S&P 500 si no existe o si se fuerza la actualización.
+    """
+    file_path = f"{data_folder}/constituents.csv"
+    url_raw = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
+    
+    os.makedirs(data_folder, exist_ok=True)
+    
+    if not os.path.exists(file_path) or force_update:
+        print("Descargando constituents.csv desde GitHub...")
+        urllib.request.urlretrieve(url_raw, file_path)
+        print("Descarga completada.")
+    else:
+        print("Usando archivo constituents.csv local.")
+        
+    return file_path
 
 def extraer_precios(tickers_list: list) -> pd.DataFrame:
     """
