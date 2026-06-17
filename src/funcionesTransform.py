@@ -20,19 +20,7 @@ def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
     df['RelativeRevenue'] = df['TotalRevenue'] / df['Total_Market_Revenue']
 
     df.drop(columns=['Total_Market_Assets', 'Total_Market_Revenue'], inplace=True)
-
-    # Relative Equity Size: deben acotarse valores negativos a cero
-    equity_acotado = df['TotalEquity'].clip(lower=0)
-    
-    # Se agrupa la serie acotada pasándole la columna de fechas del DataFrame
-    total_market_equity = equity_acotado.groupby(df['Date']).transform('sum')
-    
-    df['RelativeEquity'] = np.where(
-        total_market_equity > 0,
-        equity_acotado / total_market_equity,
-        0.0
-    )
-    
+   
     return df
 
 
