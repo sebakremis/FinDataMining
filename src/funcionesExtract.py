@@ -51,12 +51,11 @@ def extraer_precios(tickers_list: list) -> pd.DataFrame:
 
     df_prices = pd.concat(dfs_prices, ignore_index=True)
     
-    # 2. Eliminar columnas innecesarias (usar errors='ignore' por si no hay splits/dividends)
+    # Eliminar columnas innecesarias (usar errors='ignore' por si no hay splits/dividends)
     df_prices.drop(['Open', 'High', 'Low', 'Volume', 'Dividends', 'Stock Splits'], axis=1, inplace=True, errors='ignore')
 
-    # 3. Renombrar 'Date' a 'Fecha' y quitar la zona horaria para emparejar con fundamentales
-    df_prices = df_prices.rename(columns={'Date': 'Fecha'})
-    df_prices['Fecha'] = pd.to_datetime(df_prices['Fecha']).dt.tz_localize(None)
+    # Quitar la zona horaria
+    df_prices['Date'] = pd.to_datetime(df_prices['Date']).dt.tz_localize(None)
 
     return df_prices
 
@@ -101,7 +100,7 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
             # Validación del Cash Flow (si existe)
             if cf is not None and not cf.empty:
                 df_cf = cf.T.reindex(columns=cols_cashflow)
-                # Unimos a df_temp usando el índice (Fecha)
+                # Unimos a df_temp usando el índice (que es la fecha)
                 df_temp = df_temp.join(df_cf, how='left')
             else:
                 # Fallback si no hay datos de Cash Flow
@@ -111,14 +110,14 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
 
             # Limpieza del DataFrame temporal
             df_temp = df_temp.reset_index() # Pasamos la fecha del índice a una columna
-            df_temp = df_temp.rename(columns={'index': 'Fecha'})
+            df_temp = df_temp.rename(columns={'index': 'Date'})
             df_temp['Ticker'] = ticker # Identificador del activo
 
             # --- TRANSFORMACIÓN DE FECHAS (Regla de 60 días) ---
             # Para evitar "Lookahead Bias", asumimos que la información fue pública 60 días después del cierre.
-            # Convertimos a datetime, sumamos los 60 días, y extraemos la fecha pura (.dt.date)
-            fechas_datetime = pd.to_datetime(df_temp['Fecha']).dt.tz_localize(None)
-            df_temp['Fecha'] = (fechas_datetime + pd.Timedelta(days=60)).dt.date
+            # Convertimos a datetime, sumamos los 60 días, y extraemos la fecha pura, quitando el uso horario.
+            fechas_datetime = pd.to_datetime(df_temp['Date']).dt.tz_localize(None)
+            df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=60)).dt.normalize()
 
             # Añadir a la lista solo si no está vacío
             if not df_temp.empty:
@@ -137,6 +136,54 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def calcular_retornos(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = None) -> pd.DataFrame:
+    """
+    Calcula retornos mensuales, varianza del activo y covarianza con el mercado.
+    """
+    if min_periodos is None:
+        min_periodos = int(ventana * 0.75) # establece ventana minima para los primeros valores
+        
+    ticker_mercado = df_index['Ticker'].iloc[0]
+    
+    # Preparar datos y calcular retornos
+    df_unido = pd.concat([df_precios, df_index], ignore_index=True)
+    df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Close').sort_index()
+    df_retornos = df_pivot.pct_change(fill_method=None).dropna(how='all')
+    
+    retornos_mercado = df_retornos[ticker_mercado]
+    df_activos = df_retornos.drop(columns=[ticker_mercado])
+    
+    # Calcular estadísticas móviles (Features)
+    varianzas_activos = df_activos.rolling(window=ventana, min_periods=min_periodos).var()
+    covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
+    
+    # Transformar cada matriz a formato largo (melt)
+    df_ret_long = df_activos.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MonthlyReturn'
+    )
+    df_var_long = varianzas_activos.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MonthlyVariance'
+    )
+    df_cov_long = covarianzas.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MarketCovariance'
+    )
+    
+    # Consolidar todas las features en un solo DataFrame
+    df_features = df_ret_long.merge(df_var_long, on=['Date', 'Ticker'])
+    df_features = df_features.merge(df_cov_long, on=['Date', 'Ticker'])
+    
+    # Limpiar registros sin suficientes datos (NaNs de la ventana inicial)
+    df_features = df_features.dropna(subset=['MonthlyVariance', 'MarketCovariance']).reset_index(drop=True)
+    
+    # Redondear para mayor legibilidad
+    df_features = df_features.round(6)
+
+    # Quitar uso horario de la fecha
+    df_features['Date'] = pd.to_datetime(df_features['Date']).dt.tz_localize(None).dt.normalize()
+    
+    return df_features
+
+
 # Cálculos de métricas financieras y ratios de valuación
 
 def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
@@ -149,7 +196,8 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
 
     # Datos Base
     if 'Basic Average Shares' in df_metrics.columns:
-        df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['Basic Average Shares']
+        df_metrics['BasicAvgShares'] = df_metrics['Basic Average Shares'] # Se guarda copia para la fase final
+        df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['BasicAvgShares']
     else:
         print("Advertencia: Falta 'Basic Average Shares'. No se calcularán métricas de mercado.")
         return df_metrics
@@ -162,28 +210,28 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     df_metrics['EnterpriseValue'] = df_metrics['MarketCap'] + deuda_total - efectivo
 
     # Ratios de valuación
-    df_metrics['PE_Trailing'] = df_metrics['MarketCap'] / df_metrics['Net Income']
+    df_metrics['TrailingPE'] = df_metrics['MarketCap'] / df_metrics['Net Income']
     df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / df_metrics['EBITDA']
     
     if 'Stockholders Equity' in df_metrics.columns:
         df_metrics['PriceToBook'] = df_metrics['MarketCap'] / df_metrics['Stockholders Equity']
 
     # Ratios de rentabilidad y márgenes
-    df_metrics['operatingMargins'] = df_metrics['Operating Income'] / df_metrics['Total Revenue']
-    df_metrics['profitMargins'] = df_metrics['Net Income'] / df_metrics['Total Revenue']
+    df_metrics['OperatingMargins'] = df_metrics['Operating Income'] / df_metrics['Total Revenue']
+    df_metrics['ProfitMargins'] = df_metrics['Net Income'] / df_metrics['Total Revenue']
     
     if 'Stockholders Equity' in df_metrics.columns:
-        df_metrics['returnOnEquity'] = df_metrics['Net Income'] / df_metrics['Stockholders Equity']
+        df_metrics['ReturnOnEquity'] = df_metrics['Net Income'] / df_metrics['Stockholders Equity']
         
     if 'Total Assets' in df_metrics.columns:
         df_metrics['ReturnOnAssets'] = df_metrics['Net Income'] / df_metrics['Total Assets']
 
     # Ratios de liquidez y solvencia
     if 'Stockholders Equity' in df_metrics.columns:
-        df_metrics['debtToEquity'] = deuda_total / df_metrics['Stockholders Equity']
+        df_metrics['DebtToEquity'] = deuda_total / df_metrics['Stockholders Equity']
         
     if 'Current Assets' in df_metrics.columns and 'Current Liabilities' in df_metrics.columns:
-        df_metrics['currentRatio'] = df_metrics['Current Assets'] / df_metrics['Current Liabilities']
+        df_metrics['CurrentRatio'] = df_metrics['Current Assets'] / df_metrics['Current Liabilities']
        
 
     # Ratios de crecimiento
@@ -237,8 +285,8 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     # Limpieza final
     # Redondear para legibilidad y consistencia
     cols_a_redondear = [
-        'PE_Trailing', 'PriceToBook', 'EnterpriseToEbitda', 'operatingMargins', 
-        'profitMargins', 'returnOnEquity', 'ReturnOnAssets', 'debtToEquity', 'currentRatio'
+        'TrailingPE', 'PriceToBook', 'EnterpriseToEbitda', 'OperatingMargins', 
+        'ProfitMargins', 'ReturnOnEquity', 'ReturnOnAssets', 'DebtToEquity', 'CurrentRatio'
     ]
     
     # Aplicar redondeo solo a las columnas que realmente existen en el df_metrics
@@ -248,49 +296,7 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     return df_metrics
 
 
-def calcular_retornos(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = None) -> pd.DataFrame:
-    """
-    Calcula retornos mensuales, varianza del activo y covarianza con el mercado.
-    """
-    if min_periodos is None:
-        min_periodos = int(ventana * 0.75) # establece ventana minima para los primeros valores
-        
-    ticker_mercado = df_index['Ticker'].iloc[0]
-    
-    # Preparar datos y calcular retornos
-    df_unido = pd.concat([df_precios, df_index], ignore_index=True)
-    df_pivot = df_unido.pivot(index='Fecha', columns='Ticker', values='Close').sort_index()
-    df_retornos = df_pivot.pct_change(fill_method=None).dropna(how='all')
-    
-    retornos_mercado = df_retornos[ticker_mercado]
-    df_activos = df_retornos.drop(columns=[ticker_mercado])
-    
-    # Calcular estadísticas móviles (Features)
-    varianzas_activos = df_activos.rolling(window=ventana, min_periods=min_periodos).var()
-    covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
-    
-    # Transformar cada matriz a formato largo (melt)
-    df_ret_long = df_activos.reset_index().melt(
-        id_vars='Fecha', var_name='Ticker', value_name='Retorno_Mensual'
-    )
-    df_var_long = varianzas_activos.reset_index().melt(
-        id_vars='Fecha', var_name='Ticker', value_name='Varianza_Activo'
-    )
-    df_cov_long = covarianzas.reset_index().melt(
-        id_vars='Fecha', var_name='Ticker', value_name='Covarianza_Mercado'
-    )
-    
-    # Consolidar todas las features en un solo DataFrame
-    df_features = df_ret_long.merge(df_var_long, on=['Fecha', 'Ticker'])
-    df_features = df_features.merge(df_cov_long, on=['Fecha', 'Ticker'])
-    
-    # Limpiar registros sin suficientes datos (NaNs de la ventana inicial)
-    df_features = df_features.dropna(subset=['Varianza_Activo', 'Covarianza_Mercado']).reset_index(drop=True)
-    
-    # Redondear para mayor legibilidad
-    df_features = df_features.round(6)
-    
-    return df_features
+
 
 
 # Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
@@ -322,7 +328,7 @@ def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
             try:
                 df_indicador = fred.get_series(indicador, observation_start=fecha_inicial)
                 df_indicador = df_indicador.reset_index()
-                df_indicador.columns = ['Fecha', indicador]
+                df_indicador.columns = ['Date', indicador]
                 dfs_macro.append(df_indicador)
             except Exception as e:
                 print(f"Error extrayendo {indicador} de FRED: {e}")
@@ -330,7 +336,7 @@ def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
         if dfs_macro:
             # Establecer Fecha como índice para cada dataframe
             for df in dfs_macro:
-                df.set_index('Fecha', inplace=True)
+                df.set_index('Date', inplace=True)
             
             # Concatenar en axis=1 (columnas)
             df_macro = pd.concat(dfs_macro, axis=1)
