@@ -22,7 +22,7 @@ El flujo de trabajo está modularizado en tres fases principales desarrolladas e
 ```text
 FINDATAMINING/
 ├── data/                       # Almacenamiento local de datasets y archivos de configuración
-│   ├── results/                # Sub-directorio para almacenar los reportes generados luego de modelar
+│   ├── reports/                # Sub-directorio para almacenar los reportes generados luego de modelar
 │   ├── constituents.csv        # Fichero de las acciones constituyentes del Indice S&P 500
 │   ├── raw_data.parquet        # Datos crudos generados por la fase de Extracción
 │   ├── clean_data.parquet      # Datos limpios generados en la fase Transform
