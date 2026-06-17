@@ -47,7 +47,7 @@ FINDATAMINING/
 El universo de datos se define a partir de los componentes oficiales del S&P 500 provistos en `constituents.csv`. Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** El modelo base predice sobre el logarítmo de los precios de cierre mensual. Puedes experimentar utilizando como target alguno de los ratios de valuación que se incluyen en el dataset, tal como el `EnterpriseToEbitda`.
+* **Variable objetivo (Target):** La fase de modelado permite seleccionar y experimentar con distintas variables objetivo, tales como los precios de cierre mensual, la Capitalización Bursátil o alguno de los ratios de valuación que se incluyen en el dataset (`EnterpriseToEbitda`, `TrailingPE`, etc).
 
 
 ## 🚀 Requisitos e Instalación

@@ -1,5 +1,9 @@
 # src/config.py
 
+# Establecer carpeta de datos para todo el repo. 
+# Modificar para almacenar los datos en otra ubicación.
+data_folder = "data"
+
 # Definir periodo de extracción de datos e intervalo de precios
 periodo = '4y'  # Últimos 4 años
 intervalo = '1mo'  # Precios mensuales

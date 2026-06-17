@@ -5,21 +5,294 @@ Módulo de funciones para la fase de Transformación de Datos (Transform).
 
 import numpy as np
 import pandas as pd
+from datetime import datetime
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
+from src.config import cols_balance, cols_cashflow, cols_resultados
+
+def obtener_cols_financieras()->list:
+    cols_financieras_raw = cols_balance + cols_cashflow + cols_resultados
+    cols_financieras = [col.replace(' ', '') for col in cols_financieras_raw]
+
+    return cols_financieras
+
+
+def imputar_deuda(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Imputa valores nulos en CurrentDebt y LongTermDebt basándose en la 
+    relación contable con TotalDebt.
+    """
+    # Trabajar sobre una copia
+    df_imputado = df.copy()
+    
+    # Verificar que las columnas existan antes de operar
+    columnas_deuda = ['TotalDebt', 'CurrentDebt', 'LongTermDebt']
+    if not all(col in df_imputado.columns for col in columnas_deuda):
+        print("Advertencia: Faltan columnas de deuda. No se realizó imputación.")
+        return df_imputado
+
+    # CASO 1: Si TotalDebt es 0, las componentes son 0
+    # Usamos fillna(False) por si TotalDebt también es NaN en algunas filas
+    condicion_cero = (df_imputado['TotalDebt'] == 0).fillna(False)
+    
+    df_imputado.loc[condicion_cero & df_imputado['CurrentDebt'].isnull(), 'CurrentDebt'] = 0
+    df_imputado.loc[condicion_cero & df_imputado['LongTermDebt'].isnull(), 'LongTermDebt'] = 0
+
+    # CASO 2: Deducción por resta (Total = Corto + Largo)
+    # A) Falta Corto Plazo
+    cond_falta_current = df_imputado['CurrentDebt'].isnull() & \
+                         df_imputado['TotalDebt'].notnull() & \
+                         df_imputado['LongTermDebt'].notnull()
+    
+    df_imputado.loc[cond_falta_current, 'CurrentDebt'] = \
+        df_imputado.loc[cond_falta_current, 'TotalDebt'] - df_imputado.loc[cond_falta_current, 'LongTermDebt']
+
+    # B) Falta Largo Plazo
+    cond_falta_long = df_imputado['LongTermDebt'].isnull() & \
+                      df_imputado['TotalDebt'].notnull() & \
+                      df_imputado['CurrentDebt'].notnull()
+    
+    df_imputado.loc[cond_falta_long, 'LongTermDebt'] = \
+        df_imputado.loc[cond_falta_long, 'TotalDebt'] - df_imputado.loc[cond_falta_long, 'CurrentDebt']
+
+    # SEGURIDAD: Evitar deuda negativa por discrepancias en reportes financieros
+    # (A veces las APIs tienen desajustes de centavos o datos corruptos)
+    df_imputado['CurrentDebt'] = df_imputado['CurrentDebt'].clip(lower=0)
+    df_imputado['LongTermDebt'] = df_imputado['LongTermDebt'].clip(lower=0)
+
+    return df_imputado
+
+# Cálculos de métricas financieras
+
+def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Recibe el DataFrame limpio de precios MENSUALES y datos fundamentales alineados, 
+    y calcula métricas financieras históricas.
+    """
+    # Definir columnas necesarias para calcular
+    cols_necesarias = [
+        'Ticker', 
+        'Date', 
+        'Close', 
+        'BasicAverageShares', 
+        'TotalDebt', 
+        'CashAndCashEquivalents', 
+        'NetIncome', 
+        'EBITDA', 
+        'StockholdersEquity', 
+        'OperatingIncome', 
+        'TotalRevenue', 
+        'TotalAssets', 
+        'CurrentAssets', 
+        'CurrentLiabilities', 
+        'FreeCashFlow', 
+        'CapitalExpenditure'
+    ]
+
+    for col in cols_necesarias:
+        if col not in df.columns:
+            print(f"Advertencia: Falta '{col}'. No se calcularán métricas.")
+            return df
+    
+    # Se trabaja sobre una copia
+    df_metrics = df.copy()
+
+    # Asegurar ordenamiento por fecha   
+    df_metrics = df_metrics.sort_values(by=['Ticker', 'Date'])
+
+    # Calcular Capitalización Bursátil
+    df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['BasicAverageShares']
+
+    # Preparar deuda y efectivo para el EnterpriseValue = MarketCap + Deuda Total - Efectivo
+    deuda_total = df_metrics['TotalDebt'].fillna(
+        df_metrics['CurrentDebt'].fillna(0) + df_metrics['LongTermDebt'].fillna(0)
+    )
+    efectivo = df_metrics['CashAndCashEquivalents'].fillna(0)
+    df_metrics['EnterpriseValue'] = df_metrics['MarketCap'] + deuda_total - efectivo
+
+    # Ratios de valuación
+    df_metrics['TrailingPE'] = df_metrics['MarketCap'] / df_metrics['NetIncome']
+    df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / df_metrics['EBITDA']
+    df_metrics['PriceToBook'] = df_metrics['MarketCap'] / df_metrics['StockholdersEquity']
+
+    # Ratios de rentabilidad y márgenes
+    df_metrics['OperatingMargins'] = df_metrics['OperatingIncome'] / df_metrics['TotalRevenue']
+    df_metrics['ProfitMargins'] = df_metrics['NetIncome'] / df_metrics['TotalRevenue']
+    df_metrics['ReturnOnEquity'] = df_metrics['NetIncome'] / df_metrics['StockholdersEquity']
+    df_metrics['ReturnOnAssets'] = df_metrics['NetIncome'] / df_metrics['TotalAssets']
+
+    # Ratios de liquidez y solvencia
+    df_metrics['DebtToEquity'] = deuda_total / df_metrics['StockholdersEquity']
+    df_metrics['CurrentRatio'] = df_metrics['CurrentAssets'] / df_metrics['CurrentLiabilities']
+       
+    # Ratios de crecimiento
+    '''
+    - Crecimiento interanual (Year-over-Year, YoY) - Ventana de 12 meses y Trimestral (QoQ)
+    - Se aplica .abs() en el denominador para corregir matemáticamente la dirección del 
+    crecimiento si el período anterior era negativo.
+    - Se añade un pequeño epsilon (1e-6) al denominador para evitar divisiones por cero.
+    - No me decido si utilizar una función wrapper, me parece más simple dejarlo así.
+    '''
+    epsilon = 1e-6
+
+    crecimiento_cols = []
+
+    # Revenue Growth
+    prev_rev_12 = df_metrics.groupby('Ticker')['TotalRevenue'].shift(12)
+    df_metrics['Revenue_YoY'] = (df_metrics['TotalRevenue'] - prev_rev_12) / (prev_rev_12.abs() + epsilon)
+    prev_rev_3 = df_metrics.groupby('Ticker')['TotalRevenue'].shift(3)
+    df_metrics['Revenue_QoQ'] = (df_metrics['TotalRevenue'] - prev_rev_3) / (prev_rev_3.abs() + epsilon)
+    crecimiento_cols.extend(['Revenue_YoY', 'Revenue_QoQ'])
+    
+    # EBITDA Growth
+    prev_ebitda_12 = df_metrics.groupby('Ticker')['EBITDA'].shift(12)
+    df_metrics['Ebitda_YoY'] = (df_metrics['EBITDA'] - prev_ebitda_12) / (prev_ebitda_12.abs() + epsilon)
+    prev_ebitda_3 = df_metrics.groupby('Ticker')['EBITDA'].shift(3)
+    df_metrics['Ebitda_QoQ'] = (df_metrics['EBITDA'] - prev_ebitda_3) / (prev_ebitda_3.abs() + epsilon)
+    crecimiento_cols.extend(['Ebitda_YoY', 'Ebitda_QoQ'])
+    
+    # Free Cash Flow Growth
+    prev_FCF_12 = df_metrics.groupby('Ticker')['FreeCashFlow'].shift(12)
+    df_metrics['Fcf_YoY'] = (df_metrics['FreeCashFlow'] - prev_FCF_12) / (prev_FCF_12.abs() + epsilon)
+    prev_FCF_3 = df_metrics.groupby('Ticker')['FreeCashFlow'].shift(3)
+    df_metrics['Fcf_QoQ'] = (df_metrics['FreeCashFlow'] - prev_FCF_3) / (prev_FCF_3.abs() + epsilon)
+    crecimiento_cols.extend(['Fcf_YoY', 'Fcf_QoQ'])
+
+    # CapEx Growth
+    prev_Capex_12 = df_metrics.groupby('Ticker')['CapitalExpenditure'].shift(12)
+    df_metrics['CapEx_YoY'] = (df_metrics['CapitalExpenditure'] - prev_Capex_12) / (prev_Capex_12.abs() + epsilon)
+    prev_Capex_3 = df_metrics.groupby('Ticker')['CapitalExpenditure'].shift(3)
+    df_metrics['CapEx_QoQ'] = (df_metrics['CapitalExpenditure'] - prev_Capex_3) / (prev_Capex_3.abs() + epsilon)
+    crecimiento_cols.extend(['CapEx_YoY', 'CapEx_QoQ'])
+
+    # Otras métricas
+    # Apalancamiento 
+    df_metrics['NetDebtToEbitda'] = (deuda_total - df_metrics['CashAndCashEquivalents']) / (df_metrics['EBITDA'] + epsilon)
+
+    # Free Cash Flow Conversion
+    df_metrics['FcfToEbitda'] = df_metrics['FreeCashFlow'] / (df_metrics['EBITDA'] + epsilon)
+
+    # Capital Intensity
+    # Se usa np.abs porque el Capex suele reportarse en negativo en los estados de flujo de caja
+    df_metrics['CapExToRevenue'] = np.abs(df_metrics['CapitalExpenditure']) / (df_metrics['TotalRevenue'] + epsilon)
+    
+    # Limpieza de posibles infinitos creados por EBITDAs muy cercanos a cero
+    otras_cols = ['NetDebtToEbitda', 'FcfToEbitda', 'CapExToRevenue']
+    cols_a_limpiar = crecimiento_cols + otras_cols
+    df_metrics[cols_a_limpiar] = df_metrics[cols_a_limpiar].replace([np.inf, -np.inf], np.nan)
+
+    # Acotar si quedan resultados absurdos que puedan quedar de dividir por números pequeños
+    for col in crecimiento_cols:
+            df_metrics[col] = df_metrics[col].clip(lower=-10.0, upper=10.0) # Acota entre -1000% y +1000%
+
+    # Limpieza final: Redondear columnas
+    cols_a_redondear = [
+        'TrailingPE', 'PriceToBook', 'EnterpriseToEbitda', 'OperatingMargins', 
+        'ProfitMargins', 'ReturnOnEquity', 'ReturnOnAssets', 'DebtToEquity', 'CurrentRatio'
+    ]
+    
+    df_metrics[cols_a_redondear] = df_metrics[cols_a_redondear].round(6) # 6 decimales
+
+    return df_metrics, crecimiento_cols
+
+
+def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = 3) -> pd.DataFrame:
+    """
+    Calcula retornos mensuales, varianza del activo y covarianza con el mercado.
+    """
+    if min_periodos is None:
+        min_periodos = int(ventana * 0.75) # establece ventana minima para los primeros valores
+        
+    ticker_mercado = df_index['Ticker'].iloc[0]
+    
+    # Preparar datos y calcular retornos
+    df_unido = pd.concat([df, df_index], ignore_index=True)
+    df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Close').sort_index()
+    df_retornos = df_pivot.pct_change(fill_method=None).dropna(how='all')
+    
+    retornos_mercado = df_retornos[ticker_mercado]
+    df_activos = df_retornos.drop(columns=[ticker_mercado])
+    
+    # Calcular estadísticas móviles (Features)
+    varianzas_activos = df_activos.rolling(window=ventana, min_periods=min_periodos).var()
+    covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
+    
+    # Transformar cada matriz a formato largo (melt)
+    df_ret_long = df_activos.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MonthlyReturn'
+    )
+    df_var_long = varianzas_activos.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MonthlyVariance'
+    )
+    df_cov_long = covarianzas.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MarketCovariance'
+    )
+    
+    # Consolidar todas las features en un solo DataFrame
+    df_features = df_ret_long.merge(df_var_long, on=['Date', 'Ticker'])
+    df_features = df_features.merge(df_cov_long, on=['Date', 'Ticker'])
+    
+    # Limpiar registros sin suficientes datos (NaNs de la ventana inicial)
+    df_features = df_features.dropna(subset=['MonthlyVariance', 'MarketCovariance']).reset_index(drop=True)
+    
+    # Redondear para mayor legibilidad
+    df_features = df_features.round(6)
+
+    # Unir las features con el DataFrame original
+    df_final = pd.merge(df, df_features, on=['Date', 'Ticker'], how='left')
+    
+    return df_final
+
+
+def imputar_transversal(df: pd.DataFrame, cols: list, metric: str = 'median') -> pd.DataFrame:
+    """
+    Imputa valores nulos en variables usando la métrica del sector en la misma fecha exacta. 
+    Si el sector entero no tiene datos, usa la métrica de todo el mercado.
+    
+    Args:
+        df: DataFrame original con las columnas 'Date' y 'Sector'.
+        cols: Lista de strings con los nombres de las columnas a imputar.
+        metric: 'mean' (promedio) o 'median' (mediana). Se recomienda 'median' en finanzas.
+    """
+    # Trabajar sobre una copia
+    df_imputado = df.copy()
+    
+    # Verificar que las columnas necesarias para agrupar existan
+    if 'Sector' not in df_imputado.columns or 'Date' not in df_imputado.columns:
+        raise KeyError("El DataFrame debe contener las columnas 'Date' y 'Sector'.")
+
+    for col in cols:
+        if col not in df_imputado.columns:
+            continue
+            
+        # Imputación Primaria: Agrupar por Fecha y Sector
+        metrica_sectorial = df_imputado.groupby(['Date', 'Sector'])[col].transform(metric)
+        df_imputado[col] = df_imputado[col].fillna(metrica_sectorial)
+        
+        # Imputación Secundaria (Fallback): Por si un sector entero es NaN ese mes
+        if df_imputado[col].isnull().any():
+            metrica_mercado = df_imputado.groupby('Date')[col].transform(metric)
+            df_imputado[col] = df_imputado[col].fillna(metrica_mercado)
+            
+        # Imputación Terciaria: Si todo el mercado es NaN, llenar con bfill
+        if df_imputado[col].isnull().any():
+            df_imputado[col] = df_imputado.groupby('Ticker')[col].bfill()
+
+    return df_imputado
+
+
+
 
 def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
     # Agrupar y calcular la suma total del mercado por fecha
-    df['Total_Market_Assets'] = df.groupby('Date')['TotalAssets'].transform('sum')
-    df['Total_Market_Revenue'] = df.groupby('Date')['TotalRevenue'].transform('sum')
+    df['TotalMarketAssets'] = df.groupby('Date')['TotalAssets'].transform('sum')
+    df['TotalMarketRevenue'] = df.groupby('Date')['TotalRevenue'].transform('sum')
     
     # Dividir los valores individuales por el total del mercado
-    df['RelativeAssets'] = df['TotalAssets'] / df['Total_Market_Assets']
-    df['RelativeRevenue'] = df['TotalRevenue'] / df['Total_Market_Revenue']
-
-    df.drop(columns=['Total_Market_Assets', 'Total_Market_Revenue'], inplace=True)
+    df['RelativeAssets'] = df['TotalAssets'] / df['TotalMarketAssets']
+    df['RelativeRevenue'] = df['TotalRevenue'] / df['TotalMarketRevenue']
    
     return df
 

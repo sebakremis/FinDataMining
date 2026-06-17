@@ -3,14 +3,14 @@ src/funcionesExtract.py
 Módulo de funciones para la fase de Ingestión de Datos (Extract).
 """
 import pandas as pd
-import numpy as np
-import yfinance as yf
-from src.config import periodo, intervalo, cols_resultados, cols_balance, cols_cashflow
-from datetime import datetime
 import urllib.request
+from datetime import datetime
 import os
+import yfinance as yf
+from src.config import periodo, intervalo, cols_resultados, cols_balance, cols_cashflow, data_folder
 
-def descargar_constituents(data_folder="data", force_update=False):
+
+def descargar_constituents(force_update=False):
     """
     Descarga el listado de componentes del S&P 500 si no existe o si se fuerza la actualización.
     """
@@ -27,6 +27,28 @@ def descargar_constituents(data_folder="data", force_update=False):
         print("Usando archivo constituents.csv local.")
         
     return file_path
+
+def limpieza_tickers(df:pd.DataFrame)->pd.DataFrame:
+    # Seleccionar y renombrar columnas
+    df_tickers = df[["Symbol", "GICS Sector", "Date added"]].copy()
+    df_tickers.rename(columns={
+        "Symbol": "Ticker",
+        "GICS Sector": "Sector",
+        "Date added": "DateAdded"
+        }, inplace=True)
+    
+    # Modificar "BRK.B" a "BRK-B" y "BF.B" a "BF-B" para evitar problemas con yfinance
+    df_tickers["Ticker"] = df_tickers["Ticker"].replace("BRK.B", "BRK-B")
+    df_tickers["Ticker"] = df_tickers["Ticker"].replace("BF.B", "BF-B")
+
+    # Eliminar espacios en los nombres de los sectores
+    df_tickers["Sector"] = df_tickers["Sector"].str.replace(" ", "")
+
+    # Asegurar que los Tickers no tengan espacios en blanco
+    df_tickers['Ticker'] = df_tickers['Ticker'].astype(str).str.strip()
+
+    return df_tickers
+
 
 def extraer_precios(tickers_list: list) -> pd.DataFrame:
     """
@@ -51,8 +73,8 @@ def extraer_precios(tickers_list: list) -> pd.DataFrame:
 
     df_prices = pd.concat(dfs_prices, ignore_index=True)
     
-    # Eliminar columnas innecesarias (usar errors='ignore' por si no hay splits/dividends)
-    df_prices.drop(['Open', 'High', 'Low', 'Volume', 'Dividends', 'Stock Splits'], axis=1, inplace=True, errors='ignore')
+    # Eliminar columnas innecesarias (usar errors='ignore' por si no hay splits o Capital Gains)
+    df_prices.drop(['Open', 'High', 'Low', 'Volume', 'Capital Gains', 'Stock Splits'], axis=1, inplace=True, errors='ignore')
 
     # Quitar la zona horaria
     df_prices['Date'] = pd.to_datetime(df_prices['Date']).dt.tz_localize(None)
@@ -119,6 +141,9 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
             fechas_datetime = pd.to_datetime(df_temp['Date']).dt.tz_localize(None)
             df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=60)).dt.normalize()
 
+            # Se convierte al primer dia del mes siguiente para alinear con precios mensuales
+            df_temp['Date'] = (df_temp['Date'] + pd.offsets.MonthEnd(0)) + pd.Timedelta(days=1)
+
             # Añadir a la lista solo si no está vacío
             if not df_temp.empty:
                 dfs_lista.append(df_temp)
@@ -136,167 +161,26 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def calcular_retornos(df_precios: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = None) -> pd.DataFrame:
-    """
-    Calcula retornos mensuales, varianza del activo y covarianza con el mercado.
-    """
-    if min_periodos is None:
-        min_periodos = int(ventana * 0.75) # establece ventana minima para los primeros valores
-        
-    ticker_mercado = df_index['Ticker'].iloc[0]
-    
-    # Preparar datos y calcular retornos
-    df_unido = pd.concat([df_precios, df_index], ignore_index=True)
-    df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Close').sort_index()
-    df_retornos = df_pivot.pct_change(fill_method=None).dropna(how='all')
-    
-    retornos_mercado = df_retornos[ticker_mercado]
-    df_activos = df_retornos.drop(columns=[ticker_mercado])
-    
-    # Calcular estadísticas móviles (Features)
-    varianzas_activos = df_activos.rolling(window=ventana, min_periods=min_periodos).var()
-    covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
-    
-    # Transformar cada matriz a formato largo (melt)
-    df_ret_long = df_activos.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='MonthlyReturn'
-    )
-    df_var_long = varianzas_activos.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='MonthlyVariance'
-    )
-    df_cov_long = covarianzas.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='MarketCovariance'
-    )
-    
-    # Consolidar todas las features en un solo DataFrame
-    df_features = df_ret_long.merge(df_var_long, on=['Date', 'Ticker'])
-    df_features = df_features.merge(df_cov_long, on=['Date', 'Ticker'])
-    
-    # Limpiar registros sin suficientes datos (NaNs de la ventana inicial)
-    df_features = df_features.dropna(subset=['MonthlyVariance', 'MarketCovariance']).reset_index(drop=True)
-    
-    # Redondear para mayor legibilidad
-    df_features = df_features.round(6)
+def limpieza_final(df:pd.DataFrame)->pd.DataFrame:
+    # Ordenar cronológicamente para el Forward Fill
+    df = df.sort_values(by=['Ticker', 'Date'])
 
-    # Quitar uso horario de la fecha
-    df_features['Date'] = pd.to_datetime(df_features['Date']).dt.tz_localize(None).dt.normalize()
-    
-    return df_features
+    # Aplicar Forward Fill a las columnas financieras
+    cols_financieras = cols_resultados + cols_balance + cols_cashflow
 
+    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill()
 
-# Cálculos de métricas financieras y ratios de valuación
+    # Eliminar las filas anteriores al primer reporte financiero disponible
+    columna_critica = 'EBITDA' # es necesaria para los ratios
+    df_clean = df.dropna(subset=[columna_critica])
 
-def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Recibe el DataFrame limpio de precios y fundamentales alineados, 
-    y calcula métricas de valoración históricas.
-    """
-    # Trabajamos sobre una copia para no alterar el original inadvertidamente
-    df_metrics = df.copy()
+    # Resetear el índice para que quede de 0 a N
+    df_clean = df_clean.reset_index(drop=True)
 
-    # Datos Base
-    if 'Basic Average Shares' in df_metrics.columns:
-        df_metrics['BasicAvgShares'] = df_metrics['Basic Average Shares'] # Se guarda copia para la fase final
-        df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['BasicAvgShares']
-    else:
-        print("Advertencia: Falta 'Basic Average Shares'. No se calcularán métricas de mercado.")
-        return df_metrics
+    # Eliminar espacios en los nombres de las columnas
+    df_clean.columns = df_clean.columns.str.replace(' ', '')
 
-    # Preparar deuda y efectivo para EV
-    deuda_total = df_metrics['Total Debt'].fillna(
-        df_metrics['Current Debt'].fillna(0) + df_metrics['Long Term Debt'].fillna(0)
-    )
-    efectivo = df_metrics['Cash And Cash Equivalents'].fillna(0)
-    df_metrics['EnterpriseValue'] = df_metrics['MarketCap'] + deuda_total - efectivo
-
-    # Ratios de valuación
-    df_metrics['TrailingPE'] = df_metrics['MarketCap'] / df_metrics['Net Income']
-    df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / df_metrics['EBITDA']
-    
-    if 'Stockholders Equity' in df_metrics.columns:
-        df_metrics['PriceToBook'] = df_metrics['MarketCap'] / df_metrics['Stockholders Equity']
-
-    # Ratios de rentabilidad y márgenes
-    df_metrics['OperatingMargins'] = df_metrics['Operating Income'] / df_metrics['Total Revenue']
-    df_metrics['ProfitMargins'] = df_metrics['Net Income'] / df_metrics['Total Revenue']
-    
-    if 'Stockholders Equity' in df_metrics.columns:
-        df_metrics['ReturnOnEquity'] = df_metrics['Net Income'] / df_metrics['Stockholders Equity']
-        
-    if 'Total Assets' in df_metrics.columns:
-        df_metrics['ReturnOnAssets'] = df_metrics['Net Income'] / df_metrics['Total Assets']
-
-    # Ratios de liquidez y solvencia
-    if 'Stockholders Equity' in df_metrics.columns:
-        df_metrics['DebtToEquity'] = deuda_total / df_metrics['Stockholders Equity']
-        
-    if 'Current Assets' in df_metrics.columns and 'Current Liabilities' in df_metrics.columns:
-        df_metrics['CurrentRatio'] = df_metrics['Current Assets'] / df_metrics['Current Liabilities']
-       
-
-    # Ratios de crecimiento
-    # Crecimiento interanual (Year-over-Year, YoY) - Ventana de 12 meses y Trimestral (QoQ)
-    # Se aplica .abs() en el denominador para corregir matemáticamente 
-    # la dirección del crecimiento si el periodo anterior era negativo.
-    if 'Total Revenue' in df_metrics.columns:
-        prev_rev_12 = df_metrics.groupby('Ticker')['Total Revenue'].shift(12)
-        df_metrics['Revenue_YoY'] = (df_metrics['Total Revenue'] - prev_rev_12) / prev_rev_12.abs()
-
-        prev_rev_3 = df_metrics.groupby('Ticker')['Total Revenue'].shift(3)
-        df_metrics['Revenue_QoQ'] = (df_metrics['Total Revenue'] - prev_rev_3) / prev_rev_3.abs()
-    
-    if 'EBITDA' in df_metrics.columns:
-        prev_ebitda_12 = df_metrics.groupby('Ticker')['EBITDA'].shift(12)
-        df_metrics['EBITDA_YoY'] = (df_metrics['EBITDA'] - prev_ebitda_12) / prev_ebitda_12.abs()
-
-        prev_ebitda_3 = df_metrics.groupby('Ticker')['EBITDA'].shift(3)
-        df_metrics['EBITDA_QoQ'] = (df_metrics['EBITDA'] - prev_ebitda_3) / prev_ebitda_3.abs()
-    
-    if 'Free Cash Flow' in df_metrics.columns:
-        prev_FCF_12 = df_metrics.groupby('Ticker')['Free Cash Flow'].shift(12)
-        df_metrics['FCF_YoY'] = (df_metrics['Free Cash Flow'] - prev_FCF_12) / prev_FCF_12.abs()
-
-        prev_FCF_3 = df_metrics.groupby('Ticker')['Free Cash Flow'].shift(3)
-        df_metrics['FCF_QoQ'] = (df_metrics['Free Cash Flow'] - prev_FCF_3) / prev_FCF_3.abs()
-
-    if 'Capital Expenditure' in df_metrics.columns:
-        prev_Capex_12 = df_metrics.groupby('Ticker')['Capital Expenditure'].shift(12)
-        df_metrics['Capex_YoY'] = (df_metrics['Capital Expenditure'] - prev_Capex_12) / prev_Capex_12.abs()
-
-        prev_Capex_3 = df_metrics.groupby('Ticker')['Capital Expenditure'].shift(3)
-        df_metrics['Capex_QoQ'] = (df_metrics['Capital Expenditure'] - prev_Capex_3) / prev_Capex_3.abs()
-
-    # Nuevas columnas
-    # Apalancamiento
-    # Se añade un pequeño epsilon (1e-6) al denominador para evitar divisiones por cero
-    df_metrics['NetDebt_to_EBITDA'] = (deuda_total - df_metrics['Cash And Cash Equivalents']) / (df_metrics['EBITDA'] + 1e-6)
-
-    # Free Cash Flow Conversion
-    df_metrics['FCF_to_EBITDA'] = df_metrics['Free Cash Flow'] / (df_metrics['EBITDA'] + 1e-6)
-
-    # Capital Intensity (Intensidad de capital)
-    # Usamos np.abs porque el Capex suele reportarse en negativo en los estados de flujo de caja
-    df_metrics['Capex_to_Revenue'] = np.abs(df_metrics['Capital Expenditure']) / (df_metrics['Total Revenue'] + 1e-6)
-    
-    # Limpieza de posibles infinitos creados por EBITDAs muy cercanos a cero
-    cols_nuevas = ['NetDebt_to_EBITDA', 'FCF_to_EBITDA', 'Capex_to_Revenue']
-    df_metrics[cols_nuevas] = df_metrics[cols_nuevas].replace([np.inf, -np.inf], np.nan)
-
-    # Limpieza final
-    # Redondear para legibilidad y consistencia
-    cols_a_redondear = [
-        'TrailingPE', 'PriceToBook', 'EnterpriseToEbitda', 'OperatingMargins', 
-        'ProfitMargins', 'ReturnOnEquity', 'ReturnOnAssets', 'DebtToEquity', 'CurrentRatio'
-    ]
-    
-    # Aplicar redondeo solo a las columnas que realmente existen en el df_metrics
-    cols_presentes = [col for col in cols_a_redondear if col in df_metrics.columns]
-    df_metrics[cols_presentes] = df_metrics[cols_presentes].round(4) # 4 decimales para capturar bien los porcentajes
-
-    return df_metrics
-
-
-
+    return df_clean
 
 
 # Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
@@ -304,7 +188,6 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
 '''
 from fredapi import Fred
 from src.data_sources import fred_api_key
-# Extraer datos macroeconómicos de FRED (opcional, si se quiere enriquecer el dataset con indicadores macro)
 def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
     """
     Extrae datos macroeconómicos de FRED para una lista de indicadores y un rango de fechas.
@@ -357,20 +240,6 @@ def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
             return df_macro
         else:
             return pd.DataFrame()
-
-
-def calcular_growth_features(df:pd.DataFrame, cols:list)->pd.DataFrame:
-    for col in cols:
-        try:
-            df[f'{col}_QoQ'] = df[col].pct_change(3, fill_method=None)
-            df[f'{col}_YoY'] = df[col].pct_change(12, fill_method=None)
-            
-        except Exception as e:
-            print(f"Error procesando la columna {col}: {e}")
-            continue
-    
-    return df
-
 
 
 def extraer_info(tickers_list:list)->pd.DataFrame:
