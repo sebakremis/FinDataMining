@@ -5,16 +5,25 @@
 ![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-Pipeline-green)
 ![UCM](https://img.shields.io/badge/UCM-Máster_Data_Science-8b0000.svg)
 
-Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre las acciones constituyentes del índice S&P 500. Se utilizan fuentes de datos de acceso libre y gratuito, a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en los balances corporativos. Este último es el principal limitante del tamaño del dataset, ya que sólo se dispone de los datos financieros para los 4 años previos.
- Una vez procesados, normalizados y limpios, los datos se utilizan en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
+Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre las acciones constituyentes del índice S&P 500 procedentes de fuentes de datos gratuitas. Una vez procesados, normalizados y limpios, los datos se utilizan en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
 
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
+
+## 🗄️ Fuentes de Datos
+
+Actualmente, el pipeline de extracción obtiene los datos históricos de precios de mercado y los balances corporativos de forma libre y gratuita a través de la librería `yfinance`.
+
+**Limitaciones actuales (`yfinance`):**
+El principal limitante en la fase de extracción radica en la profundidad histórica que ofrece esta librería para los datos fundamentales. La API de Yahoo Finance únicamente permite acceder a los estados financieros trimestrales de los últimos 4 trimestres, y a los balances anuales de los últimos 4 años. Esta restricción temporal limita considerablemente el número de observaciones disponibles, un factor crítico para el entrenamiento robusto de algoritmos de Machine Learning en series temporales financieras.
+
+**Próximos pasos (Integración en curso):**
+Para solucionar esta limitación y aumentar el tamaño y la representatividad del dataset, me encuentro trabajando en la rama experimental para integrar datos mediante [SimFin](https://simfin.com/). A través de una cuenta gratuita, `SimFin` permite descargar en formato masivo (bulk) los estados financieros trimestrales correspondientes a los últimos 5 años, con un año de retraso. Esta actualización en la etapa *Extract* del ETL multiplicará el volumen de datos disponibles, capturando de forma más precisa los ciclos económicos de las compañías para la fase de modelado.
 
 ## 🚧 Estado del Proyecto
 
 Este proyecto se encuentra actualmente en **fase activa de desarrollo**:
 * **Etapa actual:** Los Jupyter Notebooks provistos están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
-* **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline y la visualización dinámica de las métricas y predicciones.
+* **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline sin la necesidad de utilizar los Notebooks, asi como la visualización dinámica de las métricas y predicciones.
 
 ## 🗂️ Estructura Actual del Repositorio
 

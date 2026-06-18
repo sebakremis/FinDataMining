@@ -290,19 +290,13 @@ def extraer_info(tickers_list:list)->pd.DataFrame:
 '''
 
 # Bloque principal para pruebas desde el terminal
-# ejecutar desde la raiz: python -m src.ingestion
+# ejecutar desde la raiz: python -m src.funcionesExtract
 
 def main():
-    # Prueba de extraer_datos_macro()
-    # indicadores_prueba = ['FEDFUNDS', 'GS10', 'T10Y2Y', 'CPIAUCSL', 'UNRATE']
-    # df_macro = extraer_datos_macro(indicadores_prueba)
-    # print("Datos macroeconómicos extraídos de FRED:")
-    # print(df_macro)
-
     # Prueba de extraer_financials()
-    tickers_prueba = ["MSFT", "NVDA"]
+    tickers_prueba = ["CVNA"]
     df_fundamentals = extraer_financials(tickers_prueba)
-    df_fundamentals.to_csv("data/fundamentals_test.csv")
+    df_fundamentals.to_csv(f"{data_folder}/fundamentals_test.csv")
 
 if __name__ == "__main__":
     main()
