@@ -84,8 +84,8 @@ def extraer_precios(tickers_list: list) -> pd.DataFrame:
 
 def extraer_financials(tickers_list: list) -> pd.DataFrame:
     """
-    Extrae datos financieros del Estado de Resultados, Balance General y Cash Flow,
-    devuelve un DataFrame unificado para cálculo de ratios históricos.
+    Extrae datos financieros trimestrales del Estado de Resultados, Balance General y Cash Flow.
+    Devuelve un DataFrame unificado para cálculo de ratios históricos limitados a los últimos 4 trimestres.
     """
     dfs_lista = []       
 
@@ -93,58 +93,57 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
         try:
             yf_ticker = yf.Ticker(ticker)
             
-            # Extraer reportes anuales
-            fin = yf_ticker.financials
-            bal = yf_ticker.balance_sheet
-            cf = yf_ticker.cashflow
+            # 1. Cambiamos a los métodos trimestrales (quarterly_*)
+            fin = yf_ticker.quarterly_financials
+            bal = yf_ticker.quarterly_balance_sheet
+            cf = yf_ticker.quarterly_cashflow
 
             # Validación del Estado de Resultados
             if fin is None or fin.empty:
-                print(f"Sin datos financieros para {ticker}")
+                print(f"Sin datos financieros trimestrales para {ticker}")
                 continue
+
+            # 2. Limitamos a las primeras 4 columnas (yfinance ordena de más reciente a más antiguo)
+            fin = fin.iloc[:, :4]
 
             # Transponer y filtrar Estado de Resultados
             df_fin = fin.T.reindex(columns=cols_resultados)
 
             # Validación del Balance General (si existe)
             if bal is not None and not bal.empty:
+                bal = bal.iloc[:, :4] # Limitar a 4 trimestres
                 df_bal = bal.T.reindex(columns=cols_balance)
                 df_temp = df_fin.join(df_bal, how='left')
             else:
-                # Si no hay balance, nos quedamos con financials y llenamos el resto con nulos
-                df_temp = df_fin.copy() # Usamos .copy() para evitar SettingWithCopyWarning
+                df_temp = df_fin.copy() 
                 for col in cols_balance:
-                    df_temp[col] = float('nan') # Usar NaN nativo en lugar de pd.NA
-                
-                # Forzar que estas nuevas columnas nulas sean reconocidas como numéricas (float)
+                    df_temp[col] = float('nan') 
                 df_temp[cols_balance] = df_temp[cols_balance].astype(float)  
 
             # Validación del Cash Flow (si existe)
             if cf is not None and not cf.empty:
+                cf = cf.iloc[:, :4] # Limitar a 4 trimestres
                 df_cf = cf.T.reindex(columns=cols_cashflow)
-                # Unimos a df_temp usando el índice (que es la fecha)
                 df_temp = df_temp.join(df_cf, how='left')
             else:
-                # Fallback si no hay datos de Cash Flow
                 for col in cols_cashflow:
                     df_temp[col] = float('nan')
                 df_temp[cols_cashflow] = df_temp[cols_cashflow].astype(float)        
 
             # Limpieza del DataFrame temporal
-            df_temp = df_temp.reset_index() # Pasamos la fecha del índice a una columna
+            df_temp = df_temp.reset_index()
             df_temp = df_temp.rename(columns={'index': 'Date'})
-            df_temp['Ticker'] = ticker # Identificador del activo
+            df_temp['Ticker'] = ticker 
 
-            # --- TRANSFORMACIÓN DE FECHAS (Regla de 60 días) ---
-            # Para evitar "Lookahead Bias", asumimos que la información fue pública 60 días después del cierre.
-            # Convertimos a datetime, sumamos los 60 días, y extraemos la fecha pura, quitando el uso horario.
+            # --- TRANSFORMACIÓN DE FECHAS ---
+            # Para evitar "Lookahead Bias", asumimos que la información fue pública 30 días después del cierre.
             fechas_datetime = pd.to_datetime(df_temp['Date']).dt.tz_localize(None)
-            df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=60)).dt.normalize()
+
+            df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=30)).dt.normalize()
 
             # Se convierte al primer dia del mes siguiente para alinear con precios mensuales
             df_temp['Date'] = (df_temp['Date'] + pd.offsets.MonthEnd(0)) + pd.Timedelta(days=1)
 
-            # Añadir a la lista solo si no está vacío
             if not df_temp.empty:
                 dfs_lista.append(df_temp)
 
@@ -154,7 +153,6 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
 
     # Concatenación final
     if dfs_lista:
-        # ignore_index=True es clave aquí para tener un índice numérico limpio (0, 1, 2...)
         df_final = pd.concat(dfs_lista, axis=0, ignore_index=True)
         return df_final
     else:
