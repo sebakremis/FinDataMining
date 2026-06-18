@@ -7,7 +7,7 @@ import urllib.request
 from datetime import datetime
 import os
 import yfinance as yf
-from src.config import periodo, intervalo, cols_resultados, cols_balance, cols_cashflow, data_folder
+from src.config import periodo, intervalo, cols_resultados, cols_balance, cols_cashflow, data_folder, mapa_columnas
 
 
 def descargar_constituents(force_update=False):
@@ -180,16 +180,65 @@ def limpieza_final(df:pd.DataFrame)->pd.DataFrame:
 
     return df_clean
 
+
+
 import simfin as sf
 from src.data_sources import simfin_api_key
-def extraer_simfin() -> pd.DataFrame:
+def extraer_simfin(tickers_validos:list) -> pd.DataFrame:
     sf.set_api_key(simfin_api_key)
     sf.set_data_dir(data_folder)
 
-    # Cargar balance trimestral
-    df = sf.load_balance(variant='quarterly')
-    return df
+    # Cargar reportes trimestrales
+    df_fin = sf.load_income(variant='quarterly')
+    df_bal = sf.load_balance(variant='quarterly')
+    df_cf = sf.load_cashflow(variant='quarterly')
 
+    # Identificar columnas de metadatos compartidas que generarían sufijos (_x, _y)
+    # Se mantienen estas columnas SOLO en el dataframe de Resultados (df_fin)
+    metadatos_comunes = [
+        'SimFinId', 'Currency', 'Fiscal Year', 'Fiscal Period', 
+        'Publish Date', 'Restated Date', 'Shares (Basic)', 'Shares (Diluted)',
+        'Depreciation & Amortization'
+    ]
+
+    # 3. Eliminar metadatos de Balance y Cash Flow antes de unir
+    cols_drop_bal = [col for col in metadatos_comunes if col in df_bal.columns]
+    cols_drop_cf = [col for col in metadatos_comunes if col in df_cf.columns]
+    
+    df_bal_clean = df_bal.drop(columns=cols_drop_bal)
+    df_cf_clean = df_cf.drop(columns=cols_drop_cf)
+
+    # Unión usando el índice nativo ('Ticker' y 'Report Date')
+    # Se usa how='outer' para no perder la fila si una empresa publicó Income pero se retrasó en Cash Flow
+    df_simfin = df_fin.join(df_bal_clean, how='outer').join(df_cf_clean, how='outer')
+
+    # Resetear el índice para que Ticker y Report Date vuelvan a ser columnas normales
+    df_simfin = df_simfin.reset_index()
+
+    # Se seleccionan los tickers del S&P 500
+    df_final = df_simfin[df_simfin['Ticker'].isin(tickers_validos)]
+
+    return df_final
+
+def estandarizar_simfin(df_raw:pd.DataFrame, cols:list) -> pd.DataFrame:
+    df = df_raw.copy()
+    df.rename(columns=mapa_columnas, inplace=True)
+
+    # Calcular las columnas faltantes
+    df['EBITDA'] = df['Operating Income'] - df['Depreciation & Amortization'] # se resta por ser valores negativos
+    df['Total Debt'] = df['Current Debt'] + df['Long Term Debt']
+    df['Free Cash Flow'] = df['Operating Cash Flow'] + df['Capital Expenditure'] # se suman por ser negativos
+
+    # Asegurar que Publish Date es un formato datetime
+    df['Publish Date'] = pd.to_datetime(df['Publish Date'])
+
+    # Llevar la fecha de publicación real al primer día del mes siguiente (para unir con precios mensuales)
+    df['Date'] = (df['Publish Date'] + pd.offsets.MonthEnd(0)) + pd.Timedelta(days=1)
+
+    #  Quitar las columnas que ya no hacen falta para que coincida con yfinance
+    df = df[cols]
+
+    return df
 
 # Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
 
