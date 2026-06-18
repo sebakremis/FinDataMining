@@ -182,6 +182,16 @@ def limpieza_final(df:pd.DataFrame)->pd.DataFrame:
 
     return df_clean
 
+import simfin as sf
+from src.data_sources import simfin_api_key
+def extraer_simfin() -> pd.DataFrame:
+    sf.set_api_key(simfin_api_key)
+    sf.set_data_dir(data_folder)
+
+    # Cargar balance trimestral
+    df = sf.load_balance(variant='quarterly')
+    return df
+
 
 # Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
 
@@ -294,9 +304,13 @@ def extraer_info(tickers_list:list)->pd.DataFrame:
 
 def main():
     # Prueba de extraer_financials()
-    tickers_prueba = ["CVNA"]
-    df_fundamentals = extraer_financials(tickers_prueba)
-    df_fundamentals.to_csv(f"{data_folder}/fundamentals_test.csv")
+    #tickers_prueba = ["CVNA"]
+    #df_fundamentals = extraer_financials(tickers_prueba)
+    #df_fundamentals.to_csv(f"{data_folder}/fundamentals_test.csv")
+
+    # Prueba de extraer_simfin()
+    df = extraer_simfin()
+    print(df.head())
 
 if __name__ == "__main__":
     main()
