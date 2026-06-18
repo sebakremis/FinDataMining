@@ -2,7 +2,7 @@
 src/data_sources.example.py
 Ejemplo de archivo para la gestión de claves API DE SimFin.
 
--- NO ESCRIBAS tu clave real en este archivo. 
+-- NO ESCRIBAS tu clave real en este archivo. La clave se guarda en el archivo .env
 
 -- Asegúrate de mantener tanto .env como /src/data_sources.py 
 en tu .gitignore para evitar subir tus claves a repositorios públicos.
@@ -20,7 +20,7 @@ SIMFIN_API_KEY="tu_clave_real_aqui"
 """
 src/data_sources.py
 Modulo privado para gestionar la carga de claves API.
-NO ESCRIBAS tu clave real en este archivo. 
+NO ESCRIBAS tu clave real en este archivo. La clave se guarda en el archivo .env
 """
 import os
 from dotenv import load_dotenv

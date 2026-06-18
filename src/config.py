@@ -9,7 +9,7 @@ periodo = '6y'
 intervalo = '1mo'  
 
 # Mapeo de columnas esperadas en los reportes financieros (key = simfin, value = yfinance)
-
+# Faltan 3 columnas que se calculan en funcionesExtract.estandarizar_simfin()
 mapa_columnas = {
     # --- RESULTADOS (Income Statement) ---
     'Revenue': 'Total Revenue',
@@ -34,7 +34,8 @@ mapa_columnas = {
     'Change in Fixed Assets & Intangibles': 'Capital Expenditure'
 }
 
-
+# Listas de columnas por sector
+# Necesario para distinguir tipo de columna al calcular valores TTM en Transform
 cols_resultados = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Income', 
                     'EBITDA', 'Basic Average Shares'] 
 

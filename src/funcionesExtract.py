@@ -240,6 +240,33 @@ def estandarizar_simfin(df_raw:pd.DataFrame, cols:list) -> pd.DataFrame:
 
     return df
 
+
+def unir_financials(df_yfinance:pd.DataFrame, df_simfin:pd.DataFrame)->pd.DataFrame:
+    # Eliminar posibles duplicados INTERNOS en cada DataFrame antes de cruzarlos
+    # Se mantiene el último como válido (dato reexpresado/corregido)   
+    df_yf_unique = df_yfinance.drop_duplicates(subset=['Ticker', 'Date'], keep='last')
+    df_sf_unique = df_simfin.drop_duplicates(subset=['Ticker', 'Date'], keep='last') 
+
+    # Convertir 'Ticker' y 'Date' en el índice de ambos DataFrames temporalmente
+    df_sf_idx = df_sf_unique.set_index(['Ticker', 'Date'])
+    df_yf_idx = df_yf_unique.set_index(['Ticker', 'Date'])
+
+    # Aplicar combine_first para tratar el solapamiento
+    # Toma el valor de yfinance, si fuese NaN lo intenta rellenar con SimFin
+    df_financials_idx = df_yf_idx.combine_first(df_sf_idx)
+
+    # Se devuelven 'Ticker' y 'Date' como columnas normales
+    df_unido = df_financials_idx.reset_index()
+
+    # Auditoría de solapamientos
+    mascara_duplicados = df_unido.duplicated(subset=['Ticker', 'Date'], keep=False)
+    df_solapado = df_unido[mascara_duplicados]
+    print(f"Se han encontrado {len(df_solapado)} filas con Ticker y Date solapados.")
+
+    return df_unido
+
+
+
 # Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
 
 '''
