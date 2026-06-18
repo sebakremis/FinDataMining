@@ -5,7 +5,8 @@
 ![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-Pipeline-green)
 ![UCM](https://img.shields.io/badge/UCM-Máster_Data_Science-8b0000.svg)
 
-Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre las acciones constituyentes del índice S&P 500. Se utilizan fuentes de datos de acceso libre y gratuito, a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en los balances corporativos. Una vez procesado, normalizado y limpio, el dataset se utiliza en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
+Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre las acciones constituyentes del índice S&P 500. Se utilizan fuentes de datos de acceso libre y gratuito, a través de la librería `yfinance`, permitiendo calcular métricas y ratios financieros clave basados en los balances corporativos. Este último es el principal limitante del tamaño del dataset, ya que sólo se dispone de los datos financieros para los 4 años previos.
+ Una vez procesados, normalizados y limpios, los datos se utilizan en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
 
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
 
@@ -26,6 +27,7 @@ FINDATAMINING/
 │   ├── constituents.csv        # Fichero de las acciones constituyentes del Indice S&P 500
 │   ├── raw_data.parquet        # Datos crudos generados por la fase de Extracción
 │   ├── clean_data.parquet      # Datos limpios generados en la fase Transform
+│   ├── market_index.parquet    # Datos históricos de precios del índice del mercado
 ├── src/                        # Sub-directorio con los módulos de funciones auxiliares
 │   ├── __init__.py             # Fichero vacío, inicializa la carpeta como paquete
 │   ├── config.py               # Configuración global del proyecto #data_sources.example.py
@@ -47,7 +49,7 @@ FINDATAMINING/
 El universo de datos se define a partir de los componentes oficiales del S&P 500 provistos en `constituents.csv`. Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** La fase de modelado permite seleccionar y experimentar con distintas variables objetivo, tales como los precios de cierre mensual, la Capitalización Bursátil o alguno de los ratios de valuación que se incluyen en el dataset (`EnterpriseToEbitda`, `TrailingPE`, etc).
+* **Variable objetivo (Target):** La fase de modelado permite seleccionar y experimentar con distintas variables objetivo, tales como los precios de cierre mensual, la Capitalización Bursátil o alguno de los ratios de valuación que se incluyen en el dataset.
 
 
 ## 🚀 Requisitos e Instalación
