@@ -13,8 +13,8 @@ El objetivo es proporcionar un entorno de experimentación ágil para científic
 ## 🚧 Estado del Proyecto
 
 Este proyecto se encuentra actualmente en **fase activa de desarrollo**:
-* **Etapa actual:** Los Jupyter Notebooks provistos están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración fina de los modelos de Machine Learning.
-* **Evolución planificada:** En las próximas iteraciones, el flujo de trabajo será refactorizado y modularizado por completo en scripts de Python puro (`.py`). Asimismo, se incorporará una interfaz gráfica avanzada y un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline y la visualización dinámica de las métricas y predicciones.
+* **Etapa actual:** Los Jupyter Notebooks provistos están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
+* **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline y la visualización dinámica de las métricas y predicciones.
 
 ## 🗂️ Estructura Actual del Repositorio
 
