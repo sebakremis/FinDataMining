@@ -12,8 +12,52 @@ import seaborn as sns
 import plotly.express as px
 from src.config import cols_balance, cols_cashflow, cols_resultados
 
+def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforma variables financieras de flujo a TTM (Trailing Twelve Months) 
+    sumando los últimos 4 trimestres. Añade el sufijo '_TTM' y elimina las originales.
+    
+    Args:
+        df (pd.DataFrame): DataFrame original con datos trimestrales.
+        cols_income (list): Lista de columnas del Income Statement (ej. TotalRevenue, NetIncome).
+        cols_cashflow (list): Lista de columnas del Cash Flow (ej. OperatingCashFlow).
+        
+    Returns:
+        pd.DataFrame: DataFrame con las columnas TTM calculadas y las originales eliminadas.
+    """
+    # Crear una copia para evitar modificar el DataFrame original por referencia
+    df_ttm = df.copy()
+    
+    # Unir las listas de variables de flujo
+    cols_flujo_raw = cols_resultados + cols_cashflow
+    cols_flujo = [col.replace(' ', '') for col in cols_flujo_raw]
+    
+    # Filtrar para operar sólo sobre las columnas que realmente existen en el DataFrame
+    cols_presentes = [col for col in cols_flujo if col in df_ttm.columns]
+    
+    # Ordenar por Ticker y Date para que el rolling sea cronológico
+    df_ttm = df_ttm.sort_values(by=['Ticker', 'Date'])
+    
+    # CALCULAR TTM: Agrupar por Ticker y aplicar suma móvil de 4 trimestres
+    for col in cols_presentes:
+        nuevo_nombre = f"{col}_TTM"
+        # Usamos transform() para calcular y asignar manteniendo la estructura del índice
+        df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
+            lambda x: x.rolling(window=4, min_periods=4).sum()
+        )
+        
+    # 3. LIMPIAR: Descartar las columnas originales de flujo
+    df_ttm = df_ttm.drop(columns=cols_presentes)
+    
+    # Restaurar el orden original del índice por consistencia
+    df_ttm = df_ttm.sort_index()
+    
+    return df_ttm
+
 def obtener_cols_financieras()->list:
-    cols_financieras_raw = cols_balance + cols_cashflow + cols_resultados
+    cols_cashflow_ttm = [col+'_TTM' for col in cols_cashflow]
+    cols_resultados_ttm = [col+'_TTM' for col in cols_resultados]
+    cols_financieras_raw = cols_balance + cols_cashflow_ttm + cols_resultados_ttm
     cols_financieras = [col.replace(' ', '') for col in cols_financieras_raw]
 
     return cols_financieras
@@ -76,19 +120,19 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         'Ticker', 
         'Date', 
         'Close', 
-        'BasicAverageShares', 
+        'BasicAverageShares_TTM', 
         'TotalDebt', 
         'CashAndCashEquivalents', 
-        'NetIncome', 
-        'EBITDA', 
+        'NetIncome_TTM', 
+        'EBITDA_TTM', 
         'StockholdersEquity', 
-        'OperatingIncome', 
-        'TotalRevenue', 
+        'OperatingIncome_TTM', 
+        'TotalRevenue_TTM', 
         'TotalAssets', 
         'CurrentAssets', 
         'CurrentLiabilities', 
-        'FreeCashFlow', 
-        'CapitalExpenditure'
+        'FreeCashFlow_TTM', 
+        'CapitalExpenditure_TTM'
     ]
 
     for col in cols_necesarias:
@@ -103,7 +147,7 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     df_metrics = df_metrics.sort_values(by=['Ticker', 'Date'])
 
     # Calcular Capitalización Bursátil
-    df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['BasicAverageShares']
+    df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['BasicAverageShares_TTM']
 
     # Preparar deuda y efectivo para el EnterpriseValue = MarketCap + Deuda Total - Efectivo
     deuda_total = df_metrics['TotalDebt'].fillna(
@@ -112,74 +156,75 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     efectivo = df_metrics['CashAndCashEquivalents'].fillna(0)
     df_metrics['EnterpriseValue'] = df_metrics['MarketCap'] + deuda_total - efectivo
 
+    # Se define un valor pequeño "epsilon" para evitar divisiones por cero
+    epsilon = 1e-6
+
     # Ratios de valuación
-    df_metrics['TrailingPE'] = df_metrics['MarketCap'] / df_metrics['NetIncome']
-    df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / df_metrics['EBITDA']
-    df_metrics['PriceToBook'] = df_metrics['MarketCap'] / df_metrics['StockholdersEquity']
+    df_metrics['TrailingPE'] = df_metrics['MarketCap'] / (df_metrics['NetIncome_TTM'] + epsilon)
+    df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / (df_metrics['EBITDA_TTM'] + epsilon)
+    df_metrics['PriceToBook'] = df_metrics['MarketCap'] / (df_metrics['StockholdersEquity'] + epsilon)
 
     # Ratios de rentabilidad y márgenes
-    df_metrics['OperatingMargins'] = df_metrics['OperatingIncome'] / df_metrics['TotalRevenue']
-    df_metrics['ProfitMargins'] = df_metrics['NetIncome'] / df_metrics['TotalRevenue']
-    df_metrics['ReturnOnEquity'] = df_metrics['NetIncome'] / df_metrics['StockholdersEquity']
-    df_metrics['ReturnOnAssets'] = df_metrics['NetIncome'] / df_metrics['TotalAssets']
+    df_metrics['OperatingMargins'] = df_metrics['OperatingIncome_TTM'] / (df_metrics['TotalRevenue_TTM'] + epsilon)
+    df_metrics['ProfitMargins'] = df_metrics['NetIncome_TTM'] / (df_metrics['TotalRevenue_TTM'] + epsilon)
+    df_metrics['ReturnOnEquity'] = df_metrics['NetIncome_TTM'] / (df_metrics['StockholdersEquity'] + epsilon)
+    df_metrics['ReturnOnAssets'] = df_metrics['NetIncome_TTM'] / (df_metrics['TotalAssets'] + epsilon)
 
     # Ratios de liquidez y solvencia
-    df_metrics['DebtToEquity'] = deuda_total / df_metrics['StockholdersEquity']
-    df_metrics['CurrentRatio'] = df_metrics['CurrentAssets'] / df_metrics['CurrentLiabilities']
+    df_metrics['DebtToEquity'] = deuda_total / (df_metrics['StockholdersEquity'] + epsilon)
+    df_metrics['CurrentRatio'] = df_metrics['CurrentAssets'] / (df_metrics['CurrentLiabilities'] + epsilon)
        
     # Ratios de crecimiento
     '''
     - Crecimiento interanual (Year-over-Year, YoY) - Ventana de 12 meses y Trimestral (QoQ)
     - Se aplica .abs() en el denominador para corregir matemáticamente la dirección del 
     crecimiento si el período anterior era negativo.
-    - Se añade un pequeño epsilon (1e-6) al denominador para evitar divisiones por cero.
     - No me decido si utilizar una función wrapper, me parece más simple dejarlo así.
     '''
-    epsilon = 1e-6
-
+    
     crecimiento_cols = []
 
     # Revenue Growth
-    prev_rev_12 = df_metrics.groupby('Ticker')['TotalRevenue'].shift(12)
-    df_metrics['Revenue_YoY'] = (df_metrics['TotalRevenue'] - prev_rev_12) / (prev_rev_12.abs() + epsilon)
-    prev_rev_3 = df_metrics.groupby('Ticker')['TotalRevenue'].shift(3)
-    df_metrics['Revenue_QoQ'] = (df_metrics['TotalRevenue'] - prev_rev_3) / (prev_rev_3.abs() + epsilon)
+    prev_rev_12 = df_metrics.groupby('Ticker')['TotalRevenue_TTM'].shift(12)
+    df_metrics['Revenue_YoY'] = (df_metrics['TotalRevenue_TTM'] - prev_rev_12) / (prev_rev_12.abs() + epsilon)
+    prev_rev_3 = df_metrics.groupby('Ticker')['TotalRevenue_TTM'].shift(3)
+    df_metrics['Revenue_QoQ'] = (df_metrics['TotalRevenue_TTM'] - prev_rev_3) / (prev_rev_3.abs() + epsilon)
     crecimiento_cols.extend(['Revenue_YoY', 'Revenue_QoQ'])
     
     # EBITDA Growth
-    prev_ebitda_12 = df_metrics.groupby('Ticker')['EBITDA'].shift(12)
-    df_metrics['Ebitda_YoY'] = (df_metrics['EBITDA'] - prev_ebitda_12) / (prev_ebitda_12.abs() + epsilon)
-    prev_ebitda_3 = df_metrics.groupby('Ticker')['EBITDA'].shift(3)
-    df_metrics['Ebitda_QoQ'] = (df_metrics['EBITDA'] - prev_ebitda_3) / (prev_ebitda_3.abs() + epsilon)
+    prev_ebitda_12 = df_metrics.groupby('Ticker')['EBITDA_TTM'].shift(12)
+    df_metrics['Ebitda_YoY'] = (df_metrics['EBITDA_TTM'] - prev_ebitda_12) / (prev_ebitda_12.abs() + epsilon)
+    prev_ebitda_3 = df_metrics.groupby('Ticker')['EBITDA_TTM'].shift(3)
+    df_metrics['Ebitda_QoQ'] = (df_metrics['EBITDA_TTM'] - prev_ebitda_3) / (prev_ebitda_3.abs() + epsilon)
     crecimiento_cols.extend(['Ebitda_YoY', 'Ebitda_QoQ'])
     
     # Free Cash Flow Growth
-    prev_FCF_12 = df_metrics.groupby('Ticker')['FreeCashFlow'].shift(12)
-    df_metrics['Fcf_YoY'] = (df_metrics['FreeCashFlow'] - prev_FCF_12) / (prev_FCF_12.abs() + epsilon)
-    prev_FCF_3 = df_metrics.groupby('Ticker')['FreeCashFlow'].shift(3)
-    df_metrics['Fcf_QoQ'] = (df_metrics['FreeCashFlow'] - prev_FCF_3) / (prev_FCF_3.abs() + epsilon)
+    prev_FCF_12 = df_metrics.groupby('Ticker')['FreeCashFlow_TTM'].shift(12)
+    df_metrics['Fcf_YoY'] = (df_metrics['FreeCashFlow_TTM'] - prev_FCF_12) / (prev_FCF_12.abs() + epsilon)
+    prev_FCF_3 = df_metrics.groupby('Ticker')['FreeCashFlow_TTM'].shift(3)
+    df_metrics['Fcf_QoQ'] = (df_metrics['FreeCashFlow_TTM'] - prev_FCF_3) / (prev_FCF_3.abs() + epsilon)
     crecimiento_cols.extend(['Fcf_YoY', 'Fcf_QoQ'])
 
     # CapEx Growth
-    prev_Capex_12 = df_metrics.groupby('Ticker')['CapitalExpenditure'].shift(12)
-    df_metrics['CapEx_YoY'] = (df_metrics['CapitalExpenditure'] - prev_Capex_12) / (prev_Capex_12.abs() + epsilon)
-    prev_Capex_3 = df_metrics.groupby('Ticker')['CapitalExpenditure'].shift(3)
-    df_metrics['CapEx_QoQ'] = (df_metrics['CapitalExpenditure'] - prev_Capex_3) / (prev_Capex_3.abs() + epsilon)
+    prev_Capex_12 = df_metrics.groupby('Ticker')['CapitalExpenditure_TTM'].shift(12)
+    df_metrics['CapEx_YoY'] = (df_metrics['CapitalExpenditure_TTM'] - prev_Capex_12) / (prev_Capex_12.abs() + epsilon)
+    prev_Capex_3 = df_metrics.groupby('Ticker')['CapitalExpenditure_TTM'].shift(3)
+    df_metrics['CapEx_QoQ'] = (df_metrics['CapitalExpenditure_TTM'] - prev_Capex_3) / (prev_Capex_3.abs() + epsilon)
     crecimiento_cols.extend(['CapEx_YoY', 'CapEx_QoQ'])
 
     # Otras métricas
     # Apalancamiento 
-    df_metrics['NetDebtToEbitda'] = (deuda_total - df_metrics['CashAndCashEquivalents']) / (df_metrics['EBITDA'] + epsilon)
+    df_metrics['NetDebtToEbitda'] = (deuda_total - df_metrics['CashAndCashEquivalents']) / (df_metrics['EBITDA_TTM'] + epsilon)
 
     # Free Cash Flow Conversion
-    df_metrics['FcfToEbitda'] = df_metrics['FreeCashFlow'] / (df_metrics['EBITDA'] + epsilon)
+    df_metrics['FcfToEbitda'] = df_metrics['FreeCashFlow_TTM'] / (df_metrics['EBITDA_TTM'] + epsilon)
 
     # Capital Intensity
     # Se usa np.abs porque el Capex suele reportarse en negativo en los estados de flujo de caja
-    df_metrics['CapExToRevenue'] = np.abs(df_metrics['CapitalExpenditure']) / (df_metrics['TotalRevenue'] + epsilon)
+    df_metrics['CapExToRevenue'] = np.abs(df_metrics['CapitalExpenditure_TTM']) / (df_metrics['TotalRevenue_TTM'] + epsilon)
     
     # Limpieza de posibles infinitos creados por EBITDAs muy cercanos a cero
-    otras_cols = ['NetDebtToEbitda', 'FcfToEbitda', 'CapExToRevenue']
+    otras_cols = ['NetDebtToEbitda', 'FcfToEbitda', 'CapExToRevenue', 'TrailingPE']
     cols_a_limpiar = crecimiento_cols + otras_cols
     df_metrics[cols_a_limpiar] = df_metrics[cols_a_limpiar].replace([np.inf, -np.inf], np.nan)
 
@@ -288,11 +333,11 @@ def imputar_transversal(df: pd.DataFrame, cols: list, metric: str = 'median') ->
 def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
     # Agrupar y calcular la suma total del mercado por fecha
     df['TotalMarketAssets'] = df.groupby('Date')['TotalAssets'].transform('sum')
-    df['TotalMarketRevenue'] = df.groupby('Date')['TotalRevenue'].transform('sum')
+    df['TotalMarketRevenue'] = df.groupby('Date')['TotalRevenue_TTM'].transform('sum')
     
     # Dividir los valores individuales por el total del mercado
     df['RelativeAssets'] = df['TotalAssets'] / df['TotalMarketAssets']
-    df['RelativeRevenue'] = df['TotalRevenue'] / df['TotalMarketRevenue']
+    df['RelativeRevenue'] = df['TotalRevenue_TTM'] / df['TotalMarketRevenue']
    
     return df
 
