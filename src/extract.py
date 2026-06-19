@@ -1,6 +1,6 @@
 """
-src/funcionesExtract.py
-Módulo de funciones para la fase de Ingestión de Datos (Extract).
+src/extract.py
+Módulo de la fase de Ingestión de Datos
 """
 import pandas as pd
 import numpy as np

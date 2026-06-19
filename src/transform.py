@@ -1,6 +1,6 @@
 """
-src/funcionesTransform.py
-Módulo de funciones para la fase de Transformación de Datos (Transform).
+src/transform.py
+Módulo de la fase de Transformación de Datos
 """
 
 import numpy as np
@@ -43,7 +43,7 @@ def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
         nuevo_nombre = f"{col}_TTM"
         # Usamos transform() para calcular y asignar manteniendo la estructura del índice
         df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
-            lambda x: x.rolling(window=4, min_periods=4).sum()
+            lambda x: x.rolling(window=4, min_periods=2).sum()
         )
         
     # 3. LIMPIAR: Descartar las columnas originales de flujo

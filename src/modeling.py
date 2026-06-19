@@ -1,6 +1,6 @@
-# src/funcionesModeling.py
+# src/modeling.py
 """
-Módulo de funciones para la fase de Evaluación de Modelos (Modeling).
+Módulo de la fase de modelado
 """
 import numpy as np
 import pandas as pd

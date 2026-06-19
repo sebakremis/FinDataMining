@@ -15,13 +15,14 @@ El pipeline de extracción obtiene los datos históricos de precios de mercado y
 
 - `yfinance`: Se obtienen los precios históricos, asi como datos financieros correspondientes a los últimos cuatro reportes trimestrales. 
 
-- `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio (https://simfin.com/). Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Esto obliga a restringir el universo de tickers en el proyecto, reduciendo la cantidad de tickers en el dataset a 384 de los 500 componentes del índice.
+- `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio web (https://simfin.com/). Las instrucciones para ingresar la clave se encuentran en el fichero src/data_sources.example.py.
+Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Esto obliga a restringir el universo de tickers en el proyecto, reduciendo la cantidad de tickers en el dataset a 384 de los 500 componentes del índice.
 
 ## 🚧 Estado del Proyecto
 
 `finDataMining` se encuentra en **fase activa de desarrollo**:
 * **Etapa actual:** Los Jupyter Notebooks provistos están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
-* **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline sin la necesidad de utilizar los Notebooks, asi como la visualización dinámica de las métricas y predicciones.
+* **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline sin la necesidad de utilizar los Notebooks, asi como la visualización dinámica de las métricas y predicciones. Al integrar el flujo en aplicaciones de tipo `.py`, se desarrollarán características para poder actualizar y gestionar la base de datos.
 
 ## 🗂️ Estructura Actual del Repositorio
 
@@ -29,28 +30,28 @@ El flujo de trabajo está modularizado en tres fases principales desarrolladas e
 
 ```text
 FINDATAMINING/
-├── data/                       # Almacenamiento local de datasets y archivos de configuración
-│   ├── reports/                # Sub-directorio para almacenar los reportes generados luego de modelar
-│   ├── simfin/                 # Almacena los ficheros de datos de simFin.
-│   ├── constituents.csv        # Fichero de las acciones constituyentes del Indice S&P 500
-│   ├── raw_data.parquet        # Datos crudos generados por la fase de Extracción
-│   ├── clean_data.parquet      # Datos limpios generados en la fase Transform
-│   ├── market_index.parquet    # Datos históricos de precios del índice del mercado
-│   ├── tickers_universe.csv    # Se guardan los tickers sobre los cuales exiten datos
-├── src/                        # Sub-directorio con los módulos de funciones auxiliares
-│   ├── __init__.py             # Fichero vacío, inicializa la carpeta como paquete
-│   ├── config.py               # Configuración global del proyecto #data_sources.example.py
-│   ├── data_sources.example.py # Fichero ejemplo para gestionar la clave API de FRED (ya no se utiliza en la versión actual) 
-│   ├── funcionesExtract.py     # Funciones auxiliares reutilizables para las tareas de la fase `Extract`
-│   ├── funcionesModeling.py    # Funciones para la fase `Modeling`
-│   └── funcionesTransform.py   # Funciones para la fase `Transform`
-├── .gitignore                  # Reglas de git ignore
-├── 01_Extract.ipynb            # Cálculo de ratios fundamentales y exporta los resultados en formato parquet
-├── 02_Transform.ipynb          # Análisis Exploratorio de Datos (EDA) y preprocesamiento avanzado de variables
-├── 03_Modeling.ipynb           # Construcción, optimización y evaluación de modelos predictivos
-├── LICENSE                     # Licencia del proyecto
-├── README.md                   # Descripción del proyecto
-└── requirements.txt            # Dependencias necesarias
+├── data/                            # Almacenamiento local de datasets y archivos de configuración
+│   ├── reports/                     # Sub-directorio para almacenar los reportes generados luego de modelar
+│   ├── simfin/                      # Almacena los ficheros de datos de simFin
+│   ├── constituents.csv             # Fichero de las acciones constituyentes del Indice S&P 500
+│   ├── raw_data.parquet             # Datos crudos generados por la fase de Extracción
+│   ├── clean_data.parquet           # Datos limpios generados en la fase Transform
+│   ├── market_index.parquet         # Datos históricos de precios del índice del mercado
+│   ├── tickers_universe.csv         # Se guardan los tickers sobre los cuales exiten datos
+├── src/                             # Sub-directorio con los módulos de funciones auxiliares
+│   ├── __init__.py                  # Fichero vacío, inicializa la carpeta como paquete
+│   ├── config.py                    # Configuración global del proyecto #data_sources.example.py
+│   ├── data_sources.example.py      # Fichero ejemplo para gestionar la clave API de simFin
+│   ├── extract.py                   # Módulo de la fase de extracción
+│   ├── modeling.py                  # Módulo de la fase de modelado
+│   └── transform.py                 # Módulo de la fase transformación
+├── .gitignore                       # Reglas de git ignore
+├── 01_Notebook_Extraccion.ipynb     # Cálculo de ratios fundamentales y exporta los resultados en formato parquet
+├── 02_Notebook_Transformacion.ipynb # Análisis Exploratorio de Datos (EDA) y preprocesamiento avanzado de variables
+├── 03_Notebook_Modelado.ipynb       # Construcción, optimización y evaluación de modelos predictivos
+├── LICENSE                          # Licencia del proyecto
+├── README.md                        # Descripción del proyecto
+└── requirements.txt                 # Dependencias necesarias
 ```
 
 ## 📊 Dataset y Variables
