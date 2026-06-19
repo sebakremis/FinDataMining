@@ -28,6 +28,21 @@ def descargar_constituents(force_update=False):
         
     return file_path
 
+def clean_ticker(s):
+    """
+    Función auxiliar para la limpieza de tickers
+    """
+    if pd.isna(s):
+        return None # para evitar crear ticker 'nan'
+
+    return (
+        str(s)
+        .strip() # Eliminar espacios al principio y al final
+        .replace('.', '-')   # BRK.B -> BRK-B
+        .replace(' ', '') # Eliminar espacios intermedios
+    )
+
+
 def limpieza_tickers(df:pd.DataFrame)->pd.DataFrame:
     # Seleccionar y renombrar columnas
     df_tickers = df[["Symbol", "GICS Sector", "Date added"]].copy()
@@ -37,15 +52,11 @@ def limpieza_tickers(df:pd.DataFrame)->pd.DataFrame:
         "Date added": "DateAdded"
         }, inplace=True)
     
-    # Modificar "BRK.B" a "BRK-B" y "BF.B" a "BF-B" para evitar problemas con yfinance
-    df_tickers["Ticker"] = df_tickers["Ticker"].replace("BRK.B", "BRK-B")
-    df_tickers["Ticker"] = df_tickers["Ticker"].replace("BF.B", "BF-B")
+    # Limpieza de tickers
+    df_tickers['Ticker'] = df_tickers['Ticker'].map(clean_ticker)
 
-    # Eliminar espacios en los nombres de los sectores
-    df_tickers["Sector"] = df_tickers["Sector"].str.replace(" ", "")
-
-    # Asegurar que los Tickers no tengan espacios en blanco
-    df_tickers['Ticker'] = df_tickers['Ticker'].astype(str).str.strip()
+    # Eliminar espacios intermedios en los nombres de los sectores
+    df_tickers["Sector"] = df_tickers["Sector"].str.replace(" ", "")   
 
     return df_tickers
 
@@ -184,39 +195,51 @@ def limpieza_final(df:pd.DataFrame)->pd.DataFrame:
 
 import simfin as sf
 from src.data_sources import simfin_api_key
-def extraer_simfin(tickers_validos:list) -> pd.DataFrame:
+def extraer_simfin(tickers_validos: list) -> pd.DataFrame:
     sf.set_api_key(simfin_api_key)
-    sf.set_data_dir(data_folder)
+    sf.set_data_dir(f'{data_folder}/simfin')
 
-    # Cargar reportes trimestrales
-    df_fin = sf.load_income(variant='quarterly')
-    df_bal = sf.load_balance(variant='quarterly')
-    df_cf = sf.load_cashflow(variant='quarterly')
-
-    # Identificar columnas de metadatos compartidas que generarían sufijos (_x, _y)
-    # Se mantienen estas columnas SOLO en el dataframe de Resultados (df_fin)
+    # Identificar columnas de metadatos compartidas
     metadatos_comunes = [
         'SimFinId', 'Currency', 'Fiscal Year', 'Fiscal Period', 
         'Publish Date', 'Restated Date', 'Shares (Basic)', 'Shares (Diluted)',
-        'Depreciation & Amortization'
+        'Depreciation & Amortization', 'Provision for Loan Losses'
     ]
 
-    # 3. Eliminar metadatos de Balance y Cash Flow antes de unir
-    cols_drop_bal = [col for col in metadatos_comunes if col in df_bal.columns]
-    cols_drop_cf = [col for col in metadatos_comunes if col in df_cf.columns]
-    
-    df_bal_clean = df_bal.drop(columns=cols_drop_bal)
-    df_cf_clean = df_cf.drop(columns=cols_drop_cf)
+    # Función auxiliar para procesar cualquier sector
+    def procesar_sector(func_inc, func_bal, func_cf) -> pd.DataFrame:
+        """Descarga, limpia y une los reportes de un sector específico."""
+        df_inc = func_inc(variant='quarterly')
+        df_bal = func_bal(variant='quarterly')
+        df_cf = func_cf(variant='quarterly')
 
-    # Unión usando el índice nativo ('Ticker' y 'Report Date')
-    # Se usa how='outer' para no perder la fila si una empresa publicó Income pero se retrasó en Cash Flow
-    df_simfin = df_fin.join(df_bal_clean, how='outer').join(df_cf_clean, how='outer')
+        # Eliminar metadatos verificando las columnas del DF actual
+        cols_drop_bal = [col for col in metadatos_comunes if col in df_bal.columns]
+        cols_drop_cf = [col for col in metadatos_comunes if col in df_cf.columns]
+        
+        df_bal_clean = df_bal.drop(columns=cols_drop_bal)
+        df_cf_clean = df_cf.drop(columns=cols_drop_cf)
 
-    # Resetear el índice para que Ticker y Report Date vuelvan a ser columnas normales
-    df_simfin = df_simfin.reset_index()
+        # Unión usando el índice nativo ('Ticker' y 'Report Date')
+        return df_inc.join(df_bal_clean, how='outer').join(df_cf_clean, how='outer')
 
-    # Se seleccionan los tickers del S&P 500
-    df_final = df_simfin[df_simfin['Ticker'].isin(tickers_validos)]
+    # Obtener los DataFrames de los 3 sectores
+    df_general = procesar_sector(sf.load_income, sf.load_balance, sf.load_cashflow)
+    df_banks = procesar_sector(sf.load_income_banks, sf.load_balance_banks, sf.load_cashflow_banks)
+    df_insurance = procesar_sector(sf.load_income_insurance, sf.load_balance_insurance, sf.load_cashflow_insurance)
+
+    # Concatenar 
+    # Al tener distinto esquema de columnas, Pandas llenará con NaN donde no aplique.
+    df_consolidado = pd.concat([df_general, df_banks, df_insurance], axis=0)
+
+    # Resetear el índice
+    df_consolidado = df_consolidado.reset_index()
+
+    # Limpieza de tickers usando la misma función auxiliar que los Tickers S&P 500
+    df_consolidado['Ticker'] = df_consolidado['Ticker'].map(clean_ticker)
+
+    # Se seleccionan los tickers del S&P500
+    df_final = df_consolidado[df_consolidado['Ticker'].isin(tickers_validos)]
 
     return df_final
 
