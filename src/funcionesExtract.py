@@ -3,11 +3,19 @@ src/funcionesExtract.py
 Módulo de funciones para la fase de Ingestión de Datos (Extract).
 """
 import pandas as pd
+import numpy as np
 import urllib.request
 from datetime import datetime
 import os
 import yfinance as yf
-from src.config import periodo, intervalo, cols_resultados, cols_balance, cols_cashflow, data_folder, mapa_columnas
+import simfin as sf
+from src.data_sources import simfin_api_key
+from src.config import (
+    periodo, intervalo, cols_resultados, cols_balance,
+    cols_cashflow, data_folder, mapa_columnas,
+    retardo_publicacion
+)
+ 
 
 
 def descargar_constituents(force_update=False):
@@ -85,7 +93,7 @@ def extraer_precios(tickers_list: list) -> pd.DataFrame:
     df_prices = pd.concat(dfs_prices, ignore_index=True)
     
     # Eliminar columnas innecesarias (usar errors='ignore' por si no hay splits o Capital Gains)
-    df_prices.drop(['Open', 'High', 'Low', 'Volume', 'Capital Gains', 'Stock Splits'], axis=1, inplace=True, errors='ignore')
+    df_prices.drop(['High', 'Low', 'Volume', 'Capital Gains', 'Stock Splits'], axis=1, inplace=True, errors='ignore')
 
     # Quitar la zona horaria
     df_prices['Date'] = pd.to_datetime(df_prices['Date']).dt.tz_localize(None)
@@ -93,10 +101,43 @@ def extraer_precios(tickers_list: list) -> pd.DataFrame:
     return df_prices
 
 
-def extraer_financials(tickers_list: list) -> pd.DataFrame:
+def alinear_fecha_trimestral(fecha):
+    """
+    Desplaza una fecha hacia el próximo 1er día de los meses 3, 6, 9 o 12.
+    Postura estricta: Si la publicación es el mismo día 1, se pasa al trimestre
+    siguiente para evitar lookahead bias en precios de apertura.
+    """
+    if pd.isna(fecha):
+        return fecha
+        
+    m = fecha.month
+    y = fecha.year
+    
+    # Al usar estrictamente '<', cualquier publicación en marzo (incluyendo el día 1) 
+    # salta automáticamente a junio.
+    # Aún si la publicación hubiese sido el mismo primer día del trimestre antes de la apertura (BMO),
+    # cualquier gap en el precio de apertura habría sido inalcanzable. 
+    if m < 3:
+        return pd.Timestamp(year=y, month=3, day=1)
+    elif m < 6:
+        return pd.Timestamp(year=y, month=6, day=1)
+    elif m < 9:
+        return pd.Timestamp(year=y, month=9, day=1)
+    elif m < 12:
+        return pd.Timestamp(year=y, month=12, day=1)
+    else:
+        # Diciembre (mes 12) completo pasa a marzo del año siguiente
+        return pd.Timestamp(year=y + 1, month=3, day=1)
+    
+
+def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> pd.DataFrame:
     """
     Extrae datos financieros trimestrales del Estado de Resultados, Balance General y Cash Flow.
-    Devuelve un DataFrame unificado para cálculo de ratios históricos limitados a los últimos 4 trimestres.
+    
+    Parámetros:
+    - tickers_list: Lista de símbolos a extraer.
+    - aproximar_fechas: Si es True, usa una estimación estática de días (más rápido). 
+                        Si es False, busca las fechas reales de publicación (más lento, evita lookahead bias).
     """
     dfs_lista = []       
 
@@ -104,7 +145,7 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
         try:
             yf_ticker = yf.Ticker(ticker)
             
-            # 1. Cambiamos a los métodos trimestrales (quarterly_*)
+            # Se extraen los Estados trimestrales
             fin = yf_ticker.quarterly_financials
             bal = yf_ticker.quarterly_balance_sheet
             cf = yf_ticker.quarterly_cashflow
@@ -114,7 +155,7 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
                 print(f"Sin datos financieros trimestrales para {ticker}")
                 continue
 
-            # 2. Limitamos a las primeras 4 columnas (yfinance ordena de más reciente a más antiguo)
+            # Se limitan a las primeras 4 columnas 
             fin = fin.iloc[:, :4]
 
             # Transponer y filtrar Estado de Resultados
@@ -122,7 +163,7 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
 
             # Validación del Balance General (si existe)
             if bal is not None and not bal.empty:
-                bal = bal.iloc[:, :4] # Limitar a 4 trimestres
+                bal = bal.iloc[:, :4] 
                 df_bal = bal.T.reindex(columns=cols_balance)
                 df_temp = df_fin.join(df_bal, how='left')
             else:
@@ -133,7 +174,7 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
 
             # Validación del Cash Flow (si existe)
             if cf is not None and not cf.empty:
-                cf = cf.iloc[:, :4] # Limitar a 4 trimestres
+                cf = cf.iloc[:, :4] 
                 df_cf = cf.T.reindex(columns=cols_cashflow)
                 df_temp = df_temp.join(df_cf, how='left')
             else:
@@ -146,14 +187,38 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
             df_temp = df_temp.rename(columns={'index': 'Date'})
             df_temp['Ticker'] = ticker 
 
-            # --- TRANSFORMACIÓN DE FECHAS ---
-            # Para evitar "Lookahead Bias", asumimos que la información fue pública 30 días después del cierre.
+            # --- TRANSFORMACIÓN DE FECHAS #1: PUBLICACIÓN ---
             fechas_datetime = pd.to_datetime(df_temp['Date']).dt.tz_localize(None)
 
-            df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=30)).dt.normalize()
+            if aproximar_fechas:
+                # MODO RÁPIDO: Saltea la API de earnings y aplica vectorización directa
+                df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=retardo_publicacion)).dt.normalize()
+            else:
+                # MODO ESTRICTO: Petición a la API para fechas reales
+                try:
+                    df_earnings = yf_ticker.earnings_dates
+                    if df_earnings is not None and not df_earnings.empty:
+                        pub_dates = df_earnings.index.tz_localize(None).sort_values()
 
-            # Se convierte al primer dia del mes siguiente para alinear con precios mensuales
-            df_temp['Date'] = (df_temp['Date'] + pd.offsets.MonthEnd(0)) + pd.Timedelta(days=1)
+                        real_dates = []
+                        for q_end in fechas_datetime:
+                            valid_pubs = pub_dates[
+                                (pub_dates > q_end)
+                                & (pub_dates <= q_end + pd.Timedelta(days=90))
+                            ]
+                            if not valid_pubs.empty:
+                                real_dates.append(valid_pubs[0].normalize())
+                            else:
+                                real_dates.append((q_end + pd.Timedelta(days=retardo_publicacion)).normalize())
+                        df_temp['Date'] = real_dates
+                    else:
+                        df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=retardo_publicacion)).dt.normalize()
+                except Exception as e:
+                    print(f"Aviso: Error obteniendo fechas reales para {ticker}. Usando estimación. ({e})")
+                    df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=retardo_publicacion)).dt.normalize()
+
+            # --- TRANSFORMACIÓN DE FECHAS #2: ALINEACIÓN TRIMESTRAL ---
+            df_temp['Date'] = pd.to_datetime(df_temp['Date']).apply(alinear_fecha_trimestral)
 
             if not df_temp.empty:
                 dfs_lista.append(df_temp)
@@ -170,31 +235,6 @@ def extraer_financials(tickers_list: list) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def limpieza_final(df:pd.DataFrame)->pd.DataFrame:
-    # Ordenar cronológicamente para el Forward Fill
-    df = df.sort_values(by=['Ticker', 'Date'])
-
-    # Aplicar Forward Fill a las columnas financieras
-    cols_financieras = cols_resultados + cols_balance + cols_cashflow
-
-    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill()
-
-    # Eliminar las filas anteriores al primer reporte financiero disponible
-    columna_critica = 'EBITDA' # es necesaria para los ratios
-    df_clean = df.dropna(subset=[columna_critica])
-
-    # Resetear el índice para que quede de 0 a N
-    df_clean = df_clean.reset_index(drop=True)
-
-    # Eliminar espacios en los nombres de las columnas
-    df_clean.columns = df_clean.columns.str.replace(' ', '')
-
-    return df_clean
-
-
-
-import simfin as sf
-from src.data_sources import simfin_api_key
 def extraer_simfin(tickers_validos: list) -> pd.DataFrame:
     sf.set_api_key(simfin_api_key)
     sf.set_data_dir(f'{data_folder}/simfin')
@@ -243,6 +283,7 @@ def extraer_simfin(tickers_validos: list) -> pd.DataFrame:
 
     return df_final
 
+
 def estandarizar_simfin(df_raw:pd.DataFrame, cols:list) -> pd.DataFrame:
     df = df_raw.copy()
     df.rename(columns=mapa_columnas, inplace=True)
@@ -255,8 +296,8 @@ def estandarizar_simfin(df_raw:pd.DataFrame, cols:list) -> pd.DataFrame:
     # Asegurar que Publish Date es un formato datetime
     df['Publish Date'] = pd.to_datetime(df['Publish Date'])
 
-    # Llevar la fecha de publicación real al primer día del mes siguiente (para unir con precios mensuales)
-    df['Date'] = (df['Publish Date'] + pd.offsets.MonthEnd(0)) + pd.Timedelta(days=1)
+    # Llevar la fecha de publicación real al primer día del trimestre siguiente
+    df['Date'] = pd.to_datetime(df['Publish Date']).apply(alinear_fecha_trimestral)
 
     #  Quitar las columnas que ya no hacen falta para que coincida con yfinance
     df = df[cols]
@@ -288,6 +329,119 @@ def unir_financials(df_yfinance:pd.DataFrame, df_simfin:pd.DataFrame)->pd.DataFr
 
     return df_unido
 
+
+def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
+    # Eliminar posibles fechas futuras
+    # Se hace antes del ffill para no propagar datos hacia trimestres irreales
+    hoy = pd.Timestamp.today().normalize()
+    df = df[df['Date'] <= hoy]
+
+    # Ordenar cronológicamente para el Forward Fill
+    df = df.sort_values(by=['Ticker', 'Date'])
+
+    # Aplicar Forward Fill a las columnas financieras con limite de 1, para suavizar posibles huecos
+    # (Asume que cols_resultados, cols_balance y cols_cashflow están definidas globalmente o pasadas como argumento)
+    cols_financieras = cols_resultados + cols_balance + cols_cashflow
+    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill(limit=1)
+
+    # Eliminar las filas anteriores al primer reporte financiero disponible
+    columna_critica = 'EBITDA' # es necesaria para los ratios
+    df_clean = df.dropna(subset=[columna_critica])
+
+    # Resetear el índice para que quede de 0 a N
+    df_clean = df_clean.reset_index(drop=True)
+
+    # Eliminar espacios en los nombres de las columnas
+    df_clean.columns = df_clean.columns.str.replace(' ', '')
+
+    return df_clean
+
+
+# Función auxiliar para analizar el retardo de publicación
+
+
+def analizar_retardo_publicacion(tickers_list: list) -> pd.Series:
+    """
+    Calcula los días de retardo promedio entre el cierre del trimestre y la 
+    fecha real de publicación de resultados para una lista de tickers.
+    
+    Devuelve una Serie de Pandas con todos los retardos individuales encontrados.
+    """
+    lista_retardos = []
+
+    for ticker in tickers_list:
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            
+            # 1. Obtener cierres de trimestre (las columnas del Estado de Resultados)
+            fin = yf_ticker.quarterly_financials
+            if fin is None or fin.empty:
+                continue
+            
+            # Convertir a datetime sin zona horaria
+            fechas_cierre = pd.to_datetime(fin.columns).tz_localize(None)
+            
+            # 2. Obtener fechas de publicación históricas
+            df_earnings = yf_ticker.earnings_dates
+            if df_earnings is None or df_earnings.empty:
+                continue
+                
+            pub_dates = df_earnings.index.tz_localize(None).sort_values()
+            
+            # 3. Calcular la diferencia para cada trimestre
+            for q_end in fechas_cierre:
+                # Buscamos la primera publicación posterior al cierre (máximo 90 días)
+                valid_pubs = pub_dates[(pub_dates > q_end) & (pub_dates <= q_end + pd.Timedelta(days=90))]
+                
+                if not valid_pubs.empty:
+                    # Guardamos la diferencia exacta en días
+                    dias_retardo = (valid_pubs[0] - q_end).days
+                    lista_retardos.append(dias_retardo)
+                    
+        except Exception as e:
+            print(f"No se pudo procesar el retardo para {ticker}: {e}")
+            continue
+
+    # 4. Procesar y mostrar resultados estadísticos
+    if lista_retardos:
+        series_retardos = pd.Series(lista_retardos)
+        
+        print("\n" + "="*40)
+        print("  ESTADÍSTICAS DEL RETARDO DE PUBLICACIÓN")
+        print("="*40)
+        print(f"Total de trimestres analizados : {len(series_retardos)}")
+        print(f"Promedio de retardo (días)    : {series_retardos.mean():.2f}")
+        print(f"Mediana de retardo (días)     : {series_retardos.median():.1f}")
+        print(f"Mínimo retardo registrado     : {series_retardos.min()} días")
+        print(f"Máximo retardo registrado     : {series_retardos.max()} dias")
+        print(f"Percentil 75 (75% reporta <)  : {series_retardos.quantile(0.75):.1f} días")
+        print(f"Percentil 90 (90% reporta <)  : {series_retardos.quantile(0.90):.1f} días")
+        print("="*40 + "\n")
+        
+        return series_retardos
+    else:
+        print("No se encontraron suficientes datos históricos para calcular los retardos.")
+        return pd.Series()
+
+
+"""
+Se obtuvo el siguiente resultado del análisis efectuado sobre el universo de tickers:
+
+========================================
+  ESTADÍSTICAS DEL RETARDO DE PUBLICACIÓN
+========================================
+Total de trimestres analizados : 2353
+Promedio de retardo (días)    : 30.32
+Mediana de retardo (días)     : 30.0
+Mínimo retardo registrado     : 3 días
+Máximo retardo registrado     : 61 dias
+Percentil 75 (75% reporta <)  : 36.0 días
+Percentil 90 (90% reporta <)  : 41.0 días
+========================================
+
+Se adopta por defecto un retardo de 30 días (mediana)
+Puedes modificar el parámetro en el fichero src/config.py
+"""
 
 
 # Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
@@ -408,6 +562,10 @@ def main():
     # Prueba de extraer_simfin()
     df = extraer_simfin()
     print(df.head())
+
+    # Análisis del tiempo medio de retardo en la fecha de publicación
+    #tickers_prueba = ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'JPM', 'V', 'PG', 'XOM']
+    #datos_retardo = analizar_retardo_publicacion(tickers_prueba)
 
 if __name__ == "__main__":
     main()

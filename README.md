@@ -11,17 +11,17 @@ El objetivo es proporcionar un entorno de experimentación ágil para científic
 
 ## 🗄️ Fuentes de Datos
 
-Actualmente, el pipeline de extracción obtiene los datos históricos de precios de mercado y los balances corporativos de forma libre y gratuita a través de la librería `yfinance`.
+El pipeline de extracción obtiene los datos históricos de precios de mercado y los balances corporativos de forma libre y gratuita, a través de las librerías: 
 
-**Limitaciones actuales (`yfinance`):**
-El principal limitante en la fase de extracción radica en la profundidad histórica que ofrece esta librería para los datos fundamentales. La API de Yahoo Finance únicamente permite acceder a los estados financieros trimestrales de los últimos 4 trimestres, y a los balances anuales de los últimos 4 años. Esta restricción temporal limita considerablemente el número de observaciones disponibles, un factor crítico para el entrenamiento robusto de algoritmos de Machine Learning en series temporales financieras.
+**yfinance:**
+Se obtienen los precios históricos, asi como datos financieros correspondientes a los últimos cuatro reportes trimestrales. 
 
-**Próximos pasos (Integración en curso):**
-Para solucionar esta limitación y aumentar el tamaño y la representatividad del dataset, me encuentro trabajando en la rama experimental para integrar datos mediante [SimFin](https://simfin.com/). A través de una cuenta gratuita, `SimFin` permite descargar en formato masivo (bulk) los estados financieros trimestrales correspondientes a los últimos 5 años, con un año de retraso. Esta actualización en la etapa *Extract* del ETL multiplicará el volumen de datos disponibles, capturando de forma más precisa los ciclos económicos de las compañías para la fase de modelado.
+**simFin:**
+A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio (https://simfin.com/). Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Esto obliga a restringir el universo de tickers en el proyecto, reduciendo la cantidad de tickers en el dataset a 384 de los 500 componentes del índice.
 
 ## 🚧 Estado del Proyecto
 
-Este proyecto se encuentra actualmente en **fase activa de desarrollo**:
+`finDataMining` se encuentra en **fase activa de desarrollo**:
 * **Etapa actual:** Los Jupyter Notebooks provistos están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
 * **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline sin la necesidad de utilizar los Notebooks, asi como la visualización dinámica de las métricas y predicciones.
 
@@ -33,10 +33,12 @@ El flujo de trabajo está modularizado en tres fases principales desarrolladas e
 FINDATAMINING/
 ├── data/                       # Almacenamiento local de datasets y archivos de configuración
 │   ├── reports/                # Sub-directorio para almacenar los reportes generados luego de modelar
+│   ├── simfin/                 # Almacena los ficheros de datos de simFin.
 │   ├── constituents.csv        # Fichero de las acciones constituyentes del Indice S&P 500
 │   ├── raw_data.parquet        # Datos crudos generados por la fase de Extracción
 │   ├── clean_data.parquet      # Datos limpios generados en la fase Transform
 │   ├── market_index.parquet    # Datos históricos de precios del índice del mercado
+│   ├── tickers_universe.csv    # Se guardan los tickers sobre los cuales exiten datos
 ├── src/                        # Sub-directorio con los módulos de funciones auxiliares
 │   ├── __init__.py             # Fichero vacío, inicializa la carpeta como paquete
 │   ├── config.py               # Configuración global del proyecto #data_sources.example.py
@@ -55,11 +57,10 @@ FINDATAMINING/
 
 ## 📊 Dataset y Variables
 
-El universo de datos se define a partir de los componentes oficiales del S&P 500 provistos en `constituents.csv`. Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
+Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** La fase de modelado permite seleccionar y experimentar con distintas variables objetivo, tales como los precios de cierre mensual, la Capitalización Bursátil o alguno de los ratios de valuación que se incluyen en el dataset.
-
+* **Variable objetivo (Target):** La fase de modelado permite seleccionar y experimentar con distintas variables objetivo, tales como los precios trimestrales, la Capitalización Bursátil o alguno de los ratios de valuación que se incluyen en el dataset.
 
 ## 🚀 Requisitos e Instalación
 

@@ -6,7 +6,11 @@ data_folder = "data"
 
 # Definir periodo de extracción e intervalo de precios
 periodo = '6y'  
-intervalo = '1mo'  
+intervalo = '3mo'
+
+# Definir la regla del retardo de publicación en días
+# Se usa para estimar en datos financieros de yfinance que no la incluyen
+retardo_publicacion = 30
 
 # Mapeo de columnas esperadas en los reportes financieros (key = simfin, value = yfinance)
 # Faltan 3 columnas que se calculan en funcionesExtract.estandarizar_simfin()

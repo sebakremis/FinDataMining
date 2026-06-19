@@ -243,13 +243,10 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return df_metrics, crecimiento_cols
 
 
-def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = 3) -> pd.DataFrame:
+def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4, min_periodos: int = 2) -> pd.DataFrame:
     """
     Calcula retornos mensuales, varianza del activo y covarianza con el mercado.
-    """
-    if min_periodos is None:
-        min_periodos = int(ventana * 0.75) # establece ventana minima para los primeros valores
-        
+    """       
     ticker_mercado = df_index['Ticker'].iloc[0]
     
     # Preparar datos y calcular retornos
@@ -266,10 +263,10 @@ def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 1
     
     # Transformar cada matriz a formato largo (melt)
     df_ret_long = df_activos.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='MonthlyReturn'
+        id_vars='Date', var_name='Ticker', value_name='QuarterlyReturn'
     )
     df_var_long = varianzas_activos.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='MonthlyVariance'
+        id_vars='Date', var_name='Ticker', value_name='QuarterlyVariance'
     )
     df_cov_long = covarianzas.reset_index().melt(
         id_vars='Date', var_name='Ticker', value_name='MarketCovariance'
@@ -280,7 +277,7 @@ def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 1
     df_features = df_features.merge(df_cov_long, on=['Date', 'Ticker'])
     
     # Limpiar registros sin suficientes datos (NaNs de la ventana inicial)
-    df_features = df_features.dropna(subset=['MonthlyVariance', 'MarketCovariance']).reset_index(drop=True)
+    df_features = df_features.dropna(subset=['QuarterlyVariance', 'MarketCovariance']).reset_index(drop=True)
     
     # Redondear para mayor legibilidad
     df_features = df_features.round(6)
@@ -328,16 +325,18 @@ def imputar_transversal(df: pd.DataFrame, cols: list, metric: str = 'median') ->
     return df_imputado
 
 
-
-
 def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
-    # Agrupar y calcular la suma total del mercado por fecha
-    df['TotalMarketAssets'] = df.groupby('Date')['TotalAssets'].transform('sum')
-    df['TotalMarketRevenue'] = df.groupby('Date')['TotalRevenue_TTM'].transform('sum')
+    # Limpiar anomalías: forzamos que el piso de ingresos y activos sea 0
+    revenue_clean = df['TotalRevenue_TTM'].clip(lower=0)
+    assets_clean = df['TotalAssets'].clip(lower=0)
+
+    # Agrupar y calcular la suma total del mercado por fecha usando los datos limpios
+    df['TotalMarketAssets'] = assets_clean.groupby(df['Date']).transform('sum')
+    df['TotalMarketRevenue'] = revenue_clean.groupby(df['Date']).transform('sum')
     
     # Dividir los valores individuales por el total del mercado
-    df['RelativeAssets'] = df['TotalAssets'] / df['TotalMarketAssets']
-    df['RelativeRevenue'] = df['TotalRevenue_TTM'] / df['TotalMarketRevenue']
+    df['RelativeAssets'] = assets_clean / df['TotalMarketAssets']
+    df['RelativeRevenue'] = revenue_clean / df['TotalMarketRevenue']
    
     return df
 
