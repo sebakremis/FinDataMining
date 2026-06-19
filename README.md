@@ -7,17 +7,15 @@
 
 Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre las acciones constituyentes del índice S&P 500 procedentes de fuentes de datos gratuitas. Una vez procesados, normalizados y limpios, los datos son utilizados en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
 
-El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
+El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
 
 ## 🗄️ Fuentes de Datos
 
 El pipeline de extracción obtiene los datos históricos de precios de mercado y los balances corporativos de forma libre y gratuita, a través de las librerías: 
 
-**yfinance:**
-Se obtienen los precios históricos, asi como datos financieros correspondientes a los últimos cuatro reportes trimestrales. 
+- `yfinance`: Se obtienen los precios históricos, asi como datos financieros correspondientes a los últimos cuatro reportes trimestrales. 
 
-**simFin:**
-A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio (https://simfin.com/). Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Esto obliga a restringir el universo de tickers en el proyecto, reduciendo la cantidad de tickers en el dataset a 384 de los 500 componentes del índice.
+- `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio (https://simfin.com/). Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Esto obliga a restringir el universo de tickers en el proyecto, reduciendo la cantidad de tickers en el dataset a 384 de los 500 componentes del índice.
 
 ## 🚧 Estado del Proyecto
 
