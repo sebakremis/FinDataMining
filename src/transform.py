@@ -41,10 +41,16 @@ def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
     # CALCULAR TTM: Agrupar por Ticker y aplicar suma móvil de 4 trimestres
     for col in cols_presentes:
         nuevo_nombre = f"{col}_TTM"
-        # Usamos transform() para calcular y asignar manteniendo la estructura del índice
-        df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
-            lambda x: x.rolling(window=4, min_periods=2).sum()
-        )
+        if col == 'BasicAverageShares': 
+            # se calcula el promedio en lugar de la suma
+            df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
+                lambda x: x.rolling(window=4, min_periods=4).mean()
+            )
+        else:
+            # el resto se calcula la suma
+            df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
+                lambda x: x.rolling(window=4, min_periods=4).sum()
+            )
         
     # 3. LIMPIAR: Descartar las columnas originales de flujo
     df_ttm = df_ttm.drop(columns=cols_presentes)
@@ -112,14 +118,14 @@ def imputar_deuda(df: pd.DataFrame) -> pd.DataFrame:
 
 def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """
-    Recibe el DataFrame limpio de precios MENSUALES y datos fundamentales alineados, 
+    Recibe el DataFrame limpio de precios trimestrales y datos fundamentales alineados, 
     y calcula métricas financieras históricas.
     """
     # Definir columnas necesarias para calcular
     cols_necesarias = [
         'Ticker', 
         'Date', 
-        'Close', 
+        'Open', 
         'BasicAverageShares_TTM', 
         'TotalDebt', 
         'CashAndCashEquivalents', 
@@ -147,7 +153,7 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     df_metrics = df_metrics.sort_values(by=['Ticker', 'Date'])
 
     # Calcular Capitalización Bursátil
-    df_metrics['MarketCap'] = df_metrics['Close'] * df_metrics['BasicAverageShares_TTM']
+    df_metrics['MarketCap'] = df_metrics['Open'] * df_metrics['BasicAverageShares_TTM']
 
     # Preparar deuda y efectivo para el EnterpriseValue = MarketCap + Deuda Total - Efectivo
     deuda_total = df_metrics['TotalDebt'].fillna(
@@ -251,7 +257,7 @@ def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4
     
     # Preparar datos y calcular retornos
     df_unido = pd.concat([df, df_index], ignore_index=True)
-    df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Close').sort_index()
+    df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Open').sort_index()
     df_retornos = df_pivot.pct_change(fill_method=None).dropna(how='all')
     
     retornos_mercado = df_retornos[ticker_mercado]

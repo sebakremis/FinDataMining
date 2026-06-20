@@ -279,8 +279,8 @@ def extraer_simfin(tickers_validos: list) -> pd.DataFrame:
     df_consolidado['Ticker'] = df_consolidado['Ticker'].map(clean_ticker)
 
     # Se seleccionan los tickers del S&P500
-    df_final = df_consolidado[df_consolidado['Ticker'].isin(tickers_validos)]
-
+    #df_final = df_consolidado[df_consolidado['Ticker'].isin(tickers_validos)]
+    df_final = df_consolidado.copy()
     return df_final
 
 
@@ -339,10 +339,11 @@ def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
     # Ordenar cronológicamente para el Forward Fill
     df = df.sort_values(by=['Ticker', 'Date'])
 
-    # Aplicar Forward Fill a las columnas financieras con limite de 1, para suavizar posibles huecos
+    # Aplicar Forward Fill a las columnas financieras 
+    # con limite de 3, no deben haber huecos para calcular los ratios TTM (trailing twelve months)
     # (Asume que cols_resultados, cols_balance y cols_cashflow están definidas globalmente o pasadas como argumento)
     cols_financieras = cols_resultados + cols_balance + cols_cashflow
-    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill(limit=1)
+    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill(limit=3)
 
     # Eliminar las filas anteriores al primer reporte financiero disponible
     columna_critica = 'EBITDA' # es necesaria para los ratios
