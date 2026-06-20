@@ -12,6 +12,15 @@ import seaborn as sns
 import plotly.express as px
 from src.config import cols_balance, cols_cashflow, cols_resultados
 
+
+def cubrir_huecos():
+    # Aplicar Forward Fill a las columnas financieras 
+    # con limite de 3, no deben haber huecos para calcular los ratios TTM (trailing twelve months)
+    # (Asume que cols_resultados, cols_balance y cols_cashflow están definidas globalmente o pasadas como argumento)
+    cols_financieras = cols_resultados + cols_balance + cols_cashflow
+    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill(limit=3)
+
+
 def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
     """
     Transforma variables financieras de flujo a TTM (Trailing Twelve Months) 

@@ -1,12 +1,23 @@
 # src/config.py
+from pathlib import Path
 
-# Establecer carpeta de datos para todo el repo. 
-# Modificar para almacenar los datos en otra ubicación.
+# Establecer ubicación de datos
 data_folder = "data"
+tickers_file = Path(data_folder) / "tickers_universe.csv"
 
 # Definir periodo de extracción e intervalo de precios
 periodo = '6y'  
 intervalo = '3mo'
+
+# Mapeo de tickers que cambiaron de nombre
+cambios_tickers = {
+    'ATUS': 'OPTU',  # Altice USA cambió a Optimum Communications (Nov 2025)
+    'AXL': 'DCH',    # American Axle cambió a Dauch Corporation (Ene 2026)
+    'RLGY': 'HOUS',  # Realogy Holdings cambió a Anywhere Real Estate
+    'RCII': 'UPBD',  # Rent-A-Center cambió a Upbound Group
+    'GPS': 'GAP',    # Gap Inc. cambió su ticker a GAP
+    'IIVI': 'COHR',  # II-VI Inc. cambió su nombre a Coherent
+}
 
 # Definir la regla del retardo de publicación en días
 # Se usa para estimar en datos financieros de yfinance que no la incluyen
@@ -35,7 +46,8 @@ mapa_columnas = {
     'Net Cash from Operating Activities': 'Operating Cash Flow',
     'Net Cash from Investing Activities': 'Investing Cash Flow',
     'Net Cash from Financing Activities': 'Financing Cash Flow',
-    'Change in Fixed Assets & Intangibles': 'Capital Expenditure'
+    'Change in Fixed Assets & Intangibles': 'Capital Expenditure',
+    'Depreciation & Amortization': 'Depreciation And Amortization'
 }
 
 # Listas de columnas por sector
@@ -48,4 +60,4 @@ cols_balance = ['Cash And Cash Equivalents', 'Current Debt', 'Long Term Debt',
                 'Current Liabilities']
 
 cols_cashflow = ['Operating Cash Flow', 'Investing Cash Flow', 'Financing Cash Flow', 
-                    'Free Cash Flow', 'Capital Expenditure'] 
+                    'Free Cash Flow', 'Capital Expenditure', 'Depreciation And Amortization'] 
