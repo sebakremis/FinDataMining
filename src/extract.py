@@ -264,7 +264,7 @@ def alinear_fecha_trimestral(fecha):
         return pd.Timestamp(year=y + 1, month=3, day=1)
     
 
-def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> pd.DataFrame:
+def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tuple[pd.DataFrame, list[str]]:
     """
     Extrae de yfinance datos financieros trimestrales del Estado de Resultados, Balance General y Cash Flow.
     
@@ -272,8 +272,10 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> pd
     - tickers_list: Lista de símbolos a extraer.
     - aproximar_fechas: Si es True, usa una estimación estática de días (más rápido). 
                         Si es False, busca las fechas reales de publicación (más lento, evita lookahead bias).
+    - Devuelve el dataframe obtenido y la lista de tickers de los cuales no se obtuvieron datos.
     """
-    dfs_lista = []       
+    dfs_lista = []
+    tickers_sin_datos = []       
 
     for ticker in tickers_list:
         try:
@@ -287,6 +289,7 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> pd
             # Validación del Estado de Resultados
             if fin is None or fin.empty:
                 print(f"Sin datos financieros trimestrales para {ticker}")
+                tickers_sin_datos.append(ticker)
                 continue
 
             # Se limitan a las primeras 4 columnas 
@@ -359,14 +362,15 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> pd
 
         except Exception as e:
             print(f"Error procesando fundamentales para {ticker}: {e}")
+            tickers_sin_datos.append(ticker)
             continue
 
     # Concatenación final
     if dfs_lista:
         df_final = pd.concat(dfs_lista, axis=0, ignore_index=True)
-        return df_final
+        return df_final, tickers_sin_datos
     else:
-        return pd.DataFrame()
+        return pd.DataFrame(), tickers_sin_datos
 
 
 def extraer_simfin() -> pd.DataFrame:
