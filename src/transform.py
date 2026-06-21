@@ -14,6 +14,7 @@ from src.config import cols_balance, cols_cashflow, cols_resultados
 
 def financieras_en_millones(df:pd.DataFrame)->pd.DataFrame:
     cols = obtener_cols_financieras(incluirTTM=False)
+    cols.append('Volume') # se convierte también el volumen
     df[cols] = df[cols] / 10**6
     return df
 
