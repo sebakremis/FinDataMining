@@ -425,15 +425,9 @@ def estandarizar_simfin(df_raw:pd.DataFrame, cols:list) -> pd.DataFrame:
     df = df_raw.copy()
     df.rename(columns=mapa_columnas, inplace=True)
 
-    # Calcular las columnas faltantes
-    # Se imputan a cero los valores faltantes en "Depreciation And Amortization".
-    # Se asume que es cero ya que empresas donde no es relevante no lo informan.
-    # En esos casos, el EBITDA sera igual al "Operating Income".
-    df['Depreciation And Amortization'] = df['Depreciation And Amortization'].fillna(0)
-    
-    df['EBITDA'] = df['Operating Income'] - df['Depreciation And Amortization'] # se resta por ser valores negativos
-    df['Total Debt'] = df['Current Debt'] + df['Long Term Debt']
-    df['Free Cash Flow'] = df['Operating Cash Flow'] + df['Capital Expenditure'] # se suman por ser negativos
+    # Se crean las columnas faltantes vacías, luego serán calculadas en la fase de transformación
+    cols_faltantes = ['EBITDA', 'Total Debt', 'Free Cash Flow']
+    df[cols_faltantes] = np.nan
 
     # Asegurar que Publish Date es un formato datetime
     df['Publish Date'] = pd.to_datetime(df['Publish Date'])
