@@ -12,13 +12,28 @@ import seaborn as sns
 import plotly.express as px
 from src.config import cols_balance, cols_cashflow, cols_resultados
 
+def financieras_en_millones(df:pd.DataFrame)->pd.DataFrame:
+    cols = obtener_cols_financieras(incluirTTM=False)
+    df[cols] = df[cols] / 10**6
+    return df
 
-def cubrir_huecos():
-    # Aplicar Forward Fill a las columnas financieras 
-    # con limite de 3, no deben haber huecos para calcular los ratios TTM (trailing twelve months)
-    # (Asume que cols_resultados, cols_balance y cols_cashflow están definidas globalmente o pasadas como argumento)
-    cols_financieras = cols_resultados + cols_balance + cols_cashflow
-    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill(limit=3)
+
+def mostrar_missings(df:pd.DataFrame)->pd.Series:
+    """
+    Calcula la proporción de valores nulos por columna usando operaciones vectorizadas.
+    """
+    return df.isna().mean().sort_values(ascending=False)
+
+
+def cubrir_huecos(df:pd.DataFrame,limite:int=1)->pd.DataFrame:
+    """
+    - Aplica Forward Fill a las columnas financieras con limite de 1, 
+    se busca evitar huecos antes de calcular los ratios TTM (trailing twelve months).
+    - Si faltaran datos de un balance (limite=1), se completa con los datos del balance anterior. 
+    """
+    cols_financieras = obtener_cols_financieras(incluirTTM=False)
+    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill(limit=limite)
+    return df
 
 
 def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
@@ -69,9 +84,14 @@ def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
     
     return df_ttm
 
-def obtener_cols_financieras()->list:
-    cols_cashflow_ttm = [col+'_TTM' for col in cols_cashflow]
-    cols_resultados_ttm = [col+'_TTM' for col in cols_resultados]
+def obtener_cols_financieras(incluirTTM:bool=True)->list:
+    if incluirTTM:
+        cadena = '_TTM'
+    else:
+        cadena = ''
+    
+    cols_cashflow_ttm = [col + cadena for col in cols_cashflow]
+    cols_resultados_ttm = [col + cadena for col in cols_resultados]
     cols_financieras_raw = cols_balance + cols_cashflow_ttm + cols_resultados_ttm
     cols_financieras = [col.replace(' ', '') for col in cols_financieras_raw]
 
@@ -171,81 +191,84 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     efectivo = df_metrics['CashAndCashEquivalents'].fillna(0)
     df_metrics['EnterpriseValue'] = df_metrics['MarketCap'] + deuda_total - efectivo
 
-    # Se define un valor pequeño "epsilon" para evitar divisiones por cero
-    epsilon = 1e-6
+    
 
     # Ratios de valuación
-    df_metrics['TrailingPE'] = df_metrics['MarketCap'] / (df_metrics['NetIncome_TTM'] + epsilon)
-    df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / (df_metrics['EBITDA_TTM'] + epsilon)
-    df_metrics['PriceToBook'] = df_metrics['MarketCap'] / (df_metrics['StockholdersEquity'] + epsilon)
+    df_metrics['TrailingPE'] = df_metrics['MarketCap'] / df_metrics['NetIncome_TTM']
+    df_metrics['EnterpriseToEbitda'] = df_metrics['EnterpriseValue'] / df_metrics['EBITDA_TTM']
+    df_metrics['PriceToBook'] = df_metrics['MarketCap'] / df_metrics['StockholdersEquity']
 
     # Ratios de rentabilidad y márgenes
-    df_metrics['OperatingMargins'] = df_metrics['OperatingIncome_TTM'] / (df_metrics['TotalRevenue_TTM'] + epsilon)
-    df_metrics['ProfitMargins'] = df_metrics['NetIncome_TTM'] / (df_metrics['TotalRevenue_TTM'] + epsilon)
-    df_metrics['ReturnOnEquity'] = df_metrics['NetIncome_TTM'] / (df_metrics['StockholdersEquity'] + epsilon)
-    df_metrics['ReturnOnAssets'] = df_metrics['NetIncome_TTM'] / (df_metrics['TotalAssets'] + epsilon)
+    df_metrics['OperatingMargins'] = df_metrics['OperatingIncome_TTM'] / df_metrics['TotalRevenue_TTM']
+    df_metrics['ProfitMargins'] = df_metrics['NetIncome_TTM'] / df_metrics['TotalRevenue_TTM']
+    df_metrics['ReturnOnEquity'] = df_metrics['NetIncome_TTM'] / df_metrics['StockholdersEquity']
+    df_metrics['ReturnOnAssets'] = df_metrics['NetIncome_TTM'] / df_metrics['TotalAssets']
 
     # Ratios de liquidez y solvencia
-    df_metrics['DebtToEquity'] = deuda_total / (df_metrics['StockholdersEquity'] + epsilon)
-    df_metrics['CurrentRatio'] = df_metrics['CurrentAssets'] / (df_metrics['CurrentLiabilities'] + epsilon)
+    df_metrics['DebtToEquity'] = deuda_total / df_metrics['StockholdersEquity']
+    df_metrics['CurrentRatio'] = df_metrics['CurrentAssets'] / df_metrics['CurrentLiabilities']
        
     # Ratios de crecimiento
     '''
-    - Crecimiento interanual (Year-over-Year, YoY) - Ventana de 12 meses y Trimestral (QoQ)
+    - Crecimiento interanual (Year-over-Year, YoY) - Ventana de 4 trimestres y Trimestral (QoQ)
     - Se aplica .abs() en el denominador para corregir matemáticamente la dirección del 
     crecimiento si el período anterior era negativo.
     - No me decido si utilizar una función wrapper, me parece más simple dejarlo así.
     '''
-    
     crecimiento_cols = []
 
     # Revenue Growth
-    prev_rev_12 = df_metrics.groupby('Ticker')['TotalRevenue_TTM'].shift(12)
-    df_metrics['Revenue_YoY'] = (df_metrics['TotalRevenue_TTM'] - prev_rev_12) / (prev_rev_12.abs() + epsilon)
-    prev_rev_3 = df_metrics.groupby('Ticker')['TotalRevenue_TTM'].shift(3)
-    df_metrics['Revenue_QoQ'] = (df_metrics['TotalRevenue_TTM'] - prev_rev_3) / (prev_rev_3.abs() + epsilon)
+    prev_rev_4 = df_metrics.groupby('Ticker')['TotalRevenue_TTM'].shift(4)
+    df_metrics['Revenue_YoY'] = (df_metrics['TotalRevenue_TTM'] - prev_rev_4) / prev_rev_4.abs()
+    prev_rev_1 = df_metrics.groupby('Ticker')['TotalRevenue_TTM'].shift(1)
+    df_metrics['Revenue_QoQ'] = (df_metrics['TotalRevenue_TTM'] - prev_rev_1) / prev_rev_1.abs()
     crecimiento_cols.extend(['Revenue_YoY', 'Revenue_QoQ'])
     
     # EBITDA Growth
-    prev_ebitda_12 = df_metrics.groupby('Ticker')['EBITDA_TTM'].shift(12)
-    df_metrics['Ebitda_YoY'] = (df_metrics['EBITDA_TTM'] - prev_ebitda_12) / (prev_ebitda_12.abs() + epsilon)
-    prev_ebitda_3 = df_metrics.groupby('Ticker')['EBITDA_TTM'].shift(3)
-    df_metrics['Ebitda_QoQ'] = (df_metrics['EBITDA_TTM'] - prev_ebitda_3) / (prev_ebitda_3.abs() + epsilon)
+    prev_ebitda_4 = df_metrics.groupby('Ticker')['EBITDA_TTM'].shift(4)
+    df_metrics['Ebitda_YoY'] = (df_metrics['EBITDA_TTM'] - prev_ebitda_4) / prev_ebitda_4.abs()
+    prev_ebitda_1 = df_metrics.groupby('Ticker')['EBITDA_TTM'].shift(1)
+    df_metrics['Ebitda_QoQ'] = (df_metrics['EBITDA_TTM'] - prev_ebitda_1) / prev_ebitda_1.abs()
     crecimiento_cols.extend(['Ebitda_YoY', 'Ebitda_QoQ'])
     
     # Free Cash Flow Growth
-    prev_FCF_12 = df_metrics.groupby('Ticker')['FreeCashFlow_TTM'].shift(12)
-    df_metrics['Fcf_YoY'] = (df_metrics['FreeCashFlow_TTM'] - prev_FCF_12) / (prev_FCF_12.abs() + epsilon)
-    prev_FCF_3 = df_metrics.groupby('Ticker')['FreeCashFlow_TTM'].shift(3)
-    df_metrics['Fcf_QoQ'] = (df_metrics['FreeCashFlow_TTM'] - prev_FCF_3) / (prev_FCF_3.abs() + epsilon)
+    prev_FCF_4 = df_metrics.groupby('Ticker')['FreeCashFlow_TTM'].shift(4)
+    df_metrics['Fcf_YoY'] = (df_metrics['FreeCashFlow_TTM'] - prev_FCF_4) / prev_FCF_4.abs()
+    prev_FCF_1 = df_metrics.groupby('Ticker')['FreeCashFlow_TTM'].shift(1)
+    df_metrics['Fcf_QoQ'] = (df_metrics['FreeCashFlow_TTM'] - prev_FCF_1) / prev_FCF_1.abs()
     crecimiento_cols.extend(['Fcf_YoY', 'Fcf_QoQ'])
 
     # CapEx Growth
-    prev_Capex_12 = df_metrics.groupby('Ticker')['CapitalExpenditure_TTM'].shift(12)
-    df_metrics['CapEx_YoY'] = (df_metrics['CapitalExpenditure_TTM'] - prev_Capex_12) / (prev_Capex_12.abs() + epsilon)
-    prev_Capex_3 = df_metrics.groupby('Ticker')['CapitalExpenditure_TTM'].shift(3)
-    df_metrics['CapEx_QoQ'] = (df_metrics['CapitalExpenditure_TTM'] - prev_Capex_3) / (prev_Capex_3.abs() + epsilon)
+    prev_Capex_4 = df_metrics.groupby('Ticker')['CapitalExpenditure_TTM'].shift(4)
+    df_metrics['CapEx_YoY'] = (df_metrics['CapitalExpenditure_TTM'] - prev_Capex_4) / prev_Capex_4.abs()
+    prev_Capex_1 = df_metrics.groupby('Ticker')['CapitalExpenditure_TTM'].shift(1)
+    df_metrics['CapEx_QoQ'] = (df_metrics['CapitalExpenditure_TTM'] - prev_Capex_1) / prev_Capex_1.abs()
     crecimiento_cols.extend(['CapEx_YoY', 'CapEx_QoQ'])
 
     # Otras métricas
     # Apalancamiento 
-    df_metrics['NetDebtToEbitda'] = (deuda_total - df_metrics['CashAndCashEquivalents']) / (df_metrics['EBITDA_TTM'] + epsilon)
+    df_metrics['NetDebtToEbitda'] = (deuda_total - df_metrics['CashAndCashEquivalents']) / df_metrics['EBITDA_TTM']
 
     # Free Cash Flow Conversion
-    df_metrics['FcfToEbitda'] = df_metrics['FreeCashFlow_TTM'] / (df_metrics['EBITDA_TTM'] + epsilon)
+    df_metrics['FcfToEbitda'] = df_metrics['FreeCashFlow_TTM'] / df_metrics['EBITDA_TTM']
 
     # Capital Intensity
     # Se usa np.abs porque el Capex suele reportarse en negativo en los estados de flujo de caja
-    df_metrics['CapExToRevenue'] = np.abs(df_metrics['CapitalExpenditure_TTM']) / (df_metrics['TotalRevenue_TTM'] + epsilon)
+    df_metrics['CapExToRevenue'] = np.abs(df_metrics['CapitalExpenditure_TTM']) / df_metrics['TotalRevenue_TTM']
     
-    # Limpieza de posibles infinitos creados por EBITDAs muy cercanos a cero
-    otras_cols = ['NetDebtToEbitda', 'FcfToEbitda', 'CapExToRevenue', 'TrailingPE']
-    cols_a_limpiar = crecimiento_cols + otras_cols
-    df_metrics[cols_a_limpiar] = df_metrics[cols_a_limpiar].replace([np.inf, -np.inf], np.nan)
+    # Reemplazar por NaN todos los infinitos generados por divisiones por cero
+    df_metrics.replace([np.inf, -np.inf], np.nan, inplace=True)
 
     # Acotar si quedan resultados absurdos que puedan quedar de dividir por números pequeños
     for col in crecimiento_cols:
-            df_metrics[col] = df_metrics[col].clip(lower=-10.0, upper=10.0) # Acota entre -1000% y +1000%
+        df_metrics[col] = df_metrics[col].clip(lower=-10.0, upper=10.0) # Acota entre -1000% y +1000%
+
+    # Forzar NaN en métricas dependientes del Patrimonio si este es negativo
+    mask_patrimonio_invalido = df_metrics['StockholdersEquity'] <= 0
+    cols_patrimonio = ['PriceToBook', 'ReturnOnEquity', 'DebtToEquity']
+    
+    # Aplicamos el filtro usando .loc para modificar las columnas específicas
+    df_metrics.loc[mask_patrimonio_invalido, cols_patrimonio] = np.nan
 
     # Limpieza final: Redondear columnas
     cols_a_redondear = [

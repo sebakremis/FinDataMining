@@ -482,7 +482,6 @@ def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
 
     # Eliminar las filas anteriores al primer reporte financiero disponible
     columna_critica = 'Operating Income' 
-    # es necesaria para los ratios, para el modelado es equivalente al EBITDA (la diferencia es la Depreciación y Amortización)
     df_clean = df.dropna(subset=[columna_critica])
 
     # Resetear el índice para que quede de 0 a N
