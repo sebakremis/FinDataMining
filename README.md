@@ -19,7 +19,7 @@ El pipeline de extracción obtiene datos históricos de precios de mercado y los
 
 - `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio web (https://simfin.com/). Las instrucciones para ingresar la clave en el repositorio se encuentran en el fichero src/data_sources.example.py.
 
-Otra restricción de la cuenta básica de `simFin` es que no ofrece información para todos los tickers. Se define entonces un universo de 550 empresas a partir de aquellas que, teniendo una cantidad mínima de información historica disponible, presentan un mayor nivel de ventas promedio. De aquellos 550 tickers algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, contando el dataset actual con un total de 521 compañías.
+Otra restricción de la cuenta básica de `simFin` es que no ofrece información histórica completa para todos los tickers. Se define entonces un universo de 550 empresas a partir de aquellas que, teniendo una cantidad mínima de información trimestral disponible, presentan un mayor nivel de ventas en promedio. De aquellos 550 tickers algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, contando el dataset actual con un total de 521 compañías.
 
 ## 🚧 Estado del Proyecto
 
