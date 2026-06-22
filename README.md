@@ -5,9 +5,9 @@
 ![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-Pipeline-green)
 ![UCM](https://img.shields.io/badge/UCM-Máster_Data_Science-8b0000.svg)
 
-Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre las acciones constituyentes del índice S&P 500 procedentes de fuentes de datos gratuitas. Una vez procesados, normalizados y limpios, los datos son utilizados en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
+Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre acciones de EE.UU. Una vez procesados, normalizados y limpios, los datos son utilizados en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
 
-El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
+El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste pobres, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
 
 ## 🗄️ Fuentes de Datos
 
@@ -16,7 +16,7 @@ El pipeline de extracción obtiene los datos históricos de precios de mercado y
 - `yfinance`: Se obtienen los precios históricos, asi como datos financieros correspondientes a los últimos cuatro reportes trimestrales. 
 
 - `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio web (https://simfin.com/). Las instrucciones para ingresar la clave se encuentran en el fichero src/data_sources.example.py.
-Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Esto obliga a restringir el universo de tickers en el proyecto, reduciendo la cantidad de tickers en el dataset a 384 de los 500 componentes del índice.
+Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Se define entonces un universo de 550 tickers a partir de aquellos que, teniendo una cantidad mínima de información disponible en `simFin`, presentan un mayor nivel de ventas promedio. De aquellos 550 tickers algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, contando el dataset actual con 521 compañías.
 
 ## 🚧 Estado del Proyecto
 
