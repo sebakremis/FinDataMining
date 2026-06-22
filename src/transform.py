@@ -15,7 +15,27 @@ from src.config import cols_balance, cols_cashflow, cols_resultados
 def financieras_en_millones(df:pd.DataFrame)->pd.DataFrame:
     cols = obtener_cols_financieras(incluirTTM=False)
     cols.append('Volume') # se convierte también el volumen
-    df[cols] = df[cols] / 10**6
+    cols.append('CashAndCashEquivalents') # no está en la lista de columnas de yfinance
+    set_cols = set(cols)
+    df[list(set_cols)] = df[list(set_cols)] / 10**6
+    return df
+
+
+def validar_escalas(df:pd.DataFrame)->pd.DataFrame:
+    df = validar_escalas(df)
+    mask_error_escala = df['TotalAssets'] > (df['TotalRevenue'] * 100)
+
+    # Dividir por 1000 las columnas afectadas solo en los registros defectuosos
+    columnas_balance = [
+        'CashAndCashEquivalents', 
+        'TotalAssets', 
+        'StockholdersEquity', 
+        'CurrentAssets', 
+        'CurrentLiabilities'
+    ]
+
+    df.loc[mask_error_escala, columnas_balance] /= 1000
+
     return df
 
 
@@ -26,14 +46,129 @@ def mostrar_missings(df:pd.DataFrame)->pd.Series:
     return df.isna().mean().sort_values(ascending=False)
 
 
-def cubrir_huecos(df:pd.DataFrame,limite:int=1)->pd.DataFrame:
+def imputar_equivalencias_financieras(df: pd.DataFrame) -> pd.DataFrame:
     """
-    - Aplica Forward Fill a las columnas financieras con limite de 1, 
-    se busca evitar huecos antes de calcular los ratios TTM (trailing twelve months).
-    - Si faltaran datos de un balance (limite=1), se completa con los datos del balance anterior. 
+    Imputa valores nulos en columnas financieras utilizando identidades contables.
     """
-    cols_financieras = obtener_cols_financieras(incluirTTM=False)
-    df[cols_financieras] = df.groupby('Ticker')[cols_financieras].ffill(limit=limite)
+    # Trabajar sobre una copia para no alterar el dataframe original accidentalmente
+    df_imputado = df.copy()
+
+    # =========================================================================
+    # 1. IMPUTACIONES DE ESTADO DE RESULTADOS (P&L)
+    # =========================================================================
+    
+    # Se imputan a cero los valores faltantes en "DepreciationAndAmortization".
+    # Se asume que es cero ya que empresas donde no es relevante no lo informan.
+    df_imputado['DepreciationAndAmortization'] = df_imputado['DepreciationAndAmortization'].fillna(0)
+
+    # Se imputa 'EBITDA' mediante la ecuación: EBITDA = Operating Income + D&A
+    cond_falta_ebitda = df_imputado['EBITDA'].isna() & df_imputado['OperatingIncome'].notna()
+    df_imputado.loc[cond_falta_ebitda, 'EBITDA'] = (
+        df_imputado.loc[cond_falta_ebitda, 'OperatingIncome'] + 
+        df_imputado.loc[cond_falta_ebitda, 'DepreciationAndAmortization']
+    )
+
+    # =========================================================================
+    # 2. IMPUTACIONES DE FLUJO DE CAJA (CASH FLOW)
+    # =========================================================================
+    
+    # Imputar FreeCashFlow (Fórmula: FreeCashFlow = OperatingCashFlow - Capital Expenditure)
+    # Se usa .abs() en CapEx para estandarizar salidas de caja y restarlas correctamente
+    if 'FreeCashFlow' in df_imputado.columns and 'OperatingCashFlow' in df_imputado.columns and 'CapitalExpenditure' in df_imputado.columns:
+        cond_falta_fcf = df_imputado['FreeCashFlow'].isna() & df_imputado['OperatingCashFlow'].notna() & df_imputado['CapitalExpenditure'].notna()
+        df_imputado.loc[cond_falta_fcf, 'FreeCashFlow'] = (
+            df_imputado.loc[cond_falta_fcf, 'OperatingCashFlow'] - 
+            df_imputado.loc[cond_falta_fcf, 'CapitalExpenditure'].abs()
+        )
+
+    # =========================================================================
+    # 3. IMPUTACIONES DE BALANCE GENERAL (DEUDA)
+    # =========================================================================
+    
+    columnas_deuda = ['TotalDebt', 'CurrentDebt', 'LongTermDebt']
+    if not all(col in df_imputado.columns for col in columnas_deuda):
+        print("Advertencia: Faltan columnas de deuda. No se realizó imputación de deuda.")
+        return df_imputado
+
+    # CASO A: Rescate de TotalDebt (TotalDebt = CurrentDebt + LongTermDebt)
+    # Si falta el Total, pero tenemos los dos componentes, se suman
+    cond_falta_total_debt = df_imputado['TotalDebt'].isna() & df_imputado['CurrentDebt'].notna() & df_imputado['LongTermDebt'].notna()
+    df_imputado.loc[cond_falta_total_debt, 'TotalDebt'] = (
+        df_imputado.loc[cond_falta_total_debt, 'CurrentDebt'] + 
+        df_imputado.loc[cond_falta_total_debt, 'LongTermDebt']
+    )
+
+    # CASO B: Si TotalDebt es 0, las componentes son 0
+    condicion_cero = (df_imputado['TotalDebt'] == 0).fillna(False)
+    df_imputado.loc[condicion_cero & df_imputado['CurrentDebt'].isna(), 'CurrentDebt'] = 0
+    df_imputado.loc[condicion_cero & df_imputado['LongTermDebt'].isna(), 'LongTermDebt'] = 0
+
+    # CASO C: Deducción por resta (CurrentDebt = TotalDebt - LongTermDebt)
+    # C1) Falta Corto Plazo
+    cond_falta_current = df_imputado['CurrentDebt'].isna() & df_imputado['TotalDebt'].notna() & df_imputado['LongTermDebt'].notna()
+    df_imputado.loc[cond_falta_current, 'CurrentDebt'] = (
+        df_imputado.loc[cond_falta_current, 'TotalDebt'] - 
+        df_imputado.loc[cond_falta_current, 'LongTermDebt']
+    )
+
+    # C2) Falta Largo Plazo (LongTermDebt = TotalDebt - CurrentDebt)
+    cond_falta_long = df_imputado['LongTermDebt'].isna() & df_imputado['TotalDebt'].notna() & df_imputado['CurrentDebt'].notna()
+    df_imputado.loc[cond_falta_long, 'LongTermDebt'] = (
+        df_imputado.loc[cond_falta_long, 'TotalDebt'] - 
+        df_imputado.loc[cond_falta_long, 'CurrentDebt']
+    )
+
+    # SEGURIDAD: Evitar deuda negativa por discrepancias en reportes financieros
+    df_imputado['CurrentDebt'] = df_imputado['CurrentDebt'].clip(lower=0)
+    df_imputado['LongTermDebt'] = df_imputado['LongTermDebt'].clip(lower=0)
+
+    return df_imputado
+
+
+def imputar_numericas(df:pd.DataFrame)->pd.DataFrame:
+    """
+    Aplica una media móvil o mediana móvil a las columnas numéricas de un DataFrame
+    dependiendo de su asimetría (skewness).
+    """
+    # Creamos una copia
+    df_resultado = df.copy()
+
+    umbral = 3 # Valor usado para separar las simétricas de las no simétricas
+    
+    # Se seleccionan las columnas numéricas
+    cols_numericas = df_resultado.select_dtypes(include=[np.number]).columns
+    
+    # Iteramos solo sobre las numéricas
+    for col in cols_numericas:
+        # Calcular la asimetría
+        
+        sesgo = df_resultado[col].skew()
+        
+        # Manejo de casos límite: si hay muy pocos datos, skew() devuelve NaN
+        if pd.isna(sesgo):
+            continue 
+            
+        # Se separa según el valor absoluto del umbral, porque la asimetría puede ser negativa
+        if abs(sesgo) < umbral:
+            # Simétricas: Media móvil (mean)
+            df_resultado[col] = df_resultado[col].rolling(window=3, min_periods=1).mean()
+        else:
+            # Asimétricas: Mediana móvil (median)
+            df_resultado[col] = df_resultado[col].rolling(window=3, min_periods=1).median()
+            
+    # Las columnas no numéricas no se tocan y se devuelven tal cual en el df_resultado
+    return df_resultado
+
+
+def aplicar_fill(df:pd.DataFrame,limite)->pd.DataFrame:
+    """
+    - Aplica Forward Fill y Back Fill sobre  las columnas numéricas
+    """
+    cols = df.select_dtypes(include=np.number).columns
+
+    df[cols] = df.groupby('Ticker')[cols].ffill(limit=limite)
+    df[cols] = df.groupby('Ticker')[cols].bfill(limit=limite)
+
     return df
 
 
@@ -69,12 +204,12 @@ def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
         if col == 'BasicAverageShares': 
             # se calcula el promedio en lugar de la suma
             df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
-                lambda x: x.rolling(window=4, min_periods=4).mean()
+                lambda x: x.rolling(window=4, min_periods=2).mean() # Al ser un promedio y poco volátil, se puede reducir la ventana
             )
         else:
             # el resto se calcula la suma
             df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
-                lambda x: x.rolling(window=4, min_periods=4).sum()
+                lambda x: x.rolling(window=4, min_periods=4).sum() # Aqui debe ser el min_periods=4 para que sea TTM
             )
         
     # 3. LIMPIAR: Descartar las columnas originales de flujo
@@ -98,51 +233,6 @@ def obtener_cols_financieras(incluirTTM:bool=True)->list:
 
     return cols_financieras
 
-
-def imputar_deuda(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Imputa valores nulos en CurrentDebt y LongTermDebt basándose en la 
-    relación contable con TotalDebt.
-    """
-    # Trabajar sobre una copia
-    df_imputado = df.copy()
-    
-    # Verificar que las columnas existan antes de operar
-    columnas_deuda = ['TotalDebt', 'CurrentDebt', 'LongTermDebt']
-    if not all(col in df_imputado.columns for col in columnas_deuda):
-        print("Advertencia: Faltan columnas de deuda. No se realizó imputación.")
-        return df_imputado
-
-    # CASO 1: Si TotalDebt es 0, las componentes son 0
-    # Usamos fillna(False) por si TotalDebt también es NaN en algunas filas
-    condicion_cero = (df_imputado['TotalDebt'] == 0).fillna(False)
-    
-    df_imputado.loc[condicion_cero & df_imputado['CurrentDebt'].isnull(), 'CurrentDebt'] = 0
-    df_imputado.loc[condicion_cero & df_imputado['LongTermDebt'].isnull(), 'LongTermDebt'] = 0
-
-    # CASO 2: Deducción por resta (Total = Corto + Largo)
-    # A) Falta Corto Plazo
-    cond_falta_current = df_imputado['CurrentDebt'].isnull() & \
-                         df_imputado['TotalDebt'].notnull() & \
-                         df_imputado['LongTermDebt'].notnull()
-    
-    df_imputado.loc[cond_falta_current, 'CurrentDebt'] = \
-        df_imputado.loc[cond_falta_current, 'TotalDebt'] - df_imputado.loc[cond_falta_current, 'LongTermDebt']
-
-    # B) Falta Largo Plazo
-    cond_falta_long = df_imputado['LongTermDebt'].isnull() & \
-                      df_imputado['TotalDebt'].notnull() & \
-                      df_imputado['CurrentDebt'].notnull()
-    
-    df_imputado.loc[cond_falta_long, 'LongTermDebt'] = \
-        df_imputado.loc[cond_falta_long, 'TotalDebt'] - df_imputado.loc[cond_falta_long, 'CurrentDebt']
-
-    # SEGURIDAD: Evitar deuda negativa por discrepancias en reportes financieros
-    # (A veces las APIs tienen desajustes de centavos o datos corruptos)
-    df_imputado['CurrentDebt'] = df_imputado['CurrentDebt'].clip(lower=0)
-    df_imputado['LongTermDebt'] = df_imputado['LongTermDebt'].clip(lower=0)
-
-    return df_imputado
 
 # Cálculos de métricas financieras
 
@@ -182,8 +272,9 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     # Asegurar ordenamiento por fecha   
     df_metrics = df_metrics.sort_values(by=['Ticker', 'Date'])
 
-    # Calcular Capitalización Bursátil
-    df_metrics['MarketCap'] = df_metrics['Open'] * df_metrics['BasicAverageShares_TTM']
+    # Calcular Capitalización Bursátil expresada en millones (se convirtió previamente BasicAverageShare a millones)
+    df_metrics['MarketCap'] = (df_metrics['Open'] * df_metrics['BasicAverageShares_TTM'])
+
 
     # Preparar deuda y efectivo para el EnterpriseValue = MarketCap + Deuda Total - Efectivo
     deuda_total = df_metrics['TotalDebt'].fillna(
@@ -270,6 +361,15 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     
     # Aplicamos el filtro usando .loc para modificar las columnas específicas
     df_metrics.loc[mask_patrimonio_invalido, cols_patrimonio] = np.nan
+
+    # Forzar NaN en métricas dependientes de Income si son cero o negativos
+    mask_netincome_invalido = df_metrics['NetIncome_TTM'] <= 0
+    df_metrics.loc[mask_netincome_invalido,'TrailingPE'] = np.nan
+
+    mask_ebitda_invalido = df_metrics['EBITDA_TTM'] <= 0
+    df_metrics.loc[mask_ebitda_invalido,'EnterpriseToEbitda'] = np.nan
+
+
 
     # Limpieza final: Redondear columnas
     cols_a_redondear = [
