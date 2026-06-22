@@ -578,7 +578,122 @@ Puedes modificar el parámetro en el fichero src/config.py
 """
 
 
-# Funciones "legacy": ya no se utilizan en el código actual, las dejo por las dudas.
+# Bloque principal (Se replica el flujo del Notebook Extraccion)
+# Se ejecuta desde la raiz: python -m src.extract
+
+def main():
+    # Importar librerías
+    import pandas as pd
+    from src.config import data_folder, tickers_file
+
+    # Extraer datos de simFin
+    df_simfin_unfiltered = inicializar_datos_simfin(update_tickers=True)
+    print("Datos extraidos de simFin, dimensiones:", df_simfin_unfiltered.shape)
+
+    # Se lee el fichero con los tickers incluidos en el proyecto
+    df_tickers_universe = pd.read_csv(tickers_file)
+    tickers_universe_list = df_tickers_universe['Ticker'].tolist()
+    tickers_unique = list(set(tickers_universe_list)) # se asegura que no hayan duplicados
+    print("Universo de tickers extraido, cantidad de tickers:",len(tickers_unique))
+
+    # Extraer precios de los tickers y del índice SPY 
+    print("Extrayendo precios de yfinance, demora unos minutos.")
+    df_prices = extraer_precios(tickers_unique)
+
+    # Se extrae precio del Índice de Mercado para usar en cálculos y se guarda en fichero 
+    df_index = extraer_precios(['SPY'])
+    df_index.to_parquet(f"{data_folder}/market_index.parquet")
+
+    print("Extraidos precios del universo de tickers y del indice.")
+    print("Dimensiones de df_precios:", df_prices.shape)
+    print("Dimensiones de df_index:", df_index.shape)
+
+    # Actualizar el universo de tickers con los que se obtuvieron precios
+    tickers_list_updated = actualizar_universo_tickers(df_prices)
+    print("Actualizado el universo a tickers con precios disponibles en yfinance.")
+    print("Cantidad de tickers actualizado:", len(tickers_list_updated))
+
+    # Filtrar datos de simFin
+    df_simfin = df_simfin_unfiltered[df_simfin_unfiltered['Ticker'].isin(tickers_list_updated)]
+
+    # Obtener constituents del indice S&P 500
+    ruta_sp500 = descargar_constituents_sp(force_update=False) 
+
+    # Cargar y limpiar datos de constituents
+    df_tickers_sp_raw = pd.read_csv(ruta_sp500)
+    df_tickers_sp = limpiar_constituents_sp(df_tickers_sp_raw)
+    print("Cargados los tickers del S&P 500 del fichero.")
+    print("Cantidad de tickers:", df_tickers_sp['Ticker'].nunique())
+
+    # Unir df_prices y df_tickers
+    df_merged = pd.merge(
+        df_prices,
+        df_tickers_sp,
+        on= 'Ticker',
+        how= 'left'
+    )
+    print("Unidos precios con DateAdded del indice S&P500, dimensiones del dataset:", df_merged.shape)
+
+    # Extraer info de sector e industria
+    print("Extrayendo info de yfinance. Demora unos minutos.")
+    df_info = extraer_info(tickers_list_updated)
+    print("Extracción de info finalizada, dimensiones:",df_info.shape)
+
+    # Se unen los dataframes
+    df_with_info = pd.merge(
+        df_merged,
+        df_info,
+        on= 'Ticker',
+        how= 'left'
+    )
+    print("Unidos precios e info, dimensiones del dataset:", df_with_info.shape)
+
+    # Extraer datos financieros de yfinance: ultimos 4 trimestres
+    print("Extrayendo datos financieros de yfinance, demora varios minutos.")
+    df_yfinance, tickers_sin_datos = extraer_financials(tickers_list_updated, aproximar_fechas = True)
+    print("Extracción de financials de yfinance finalizada, dimensiones del dataset:", df_yfinance.shape)
+
+
+    # Definir columnas a mantener en simFin para que coincidan y estandarizar antes de unir
+    cols_yfinance = df_yfinance.columns
+    df_simfin_clean = estandarizar_simfin(df_simfin, cols_yfinance)
+
+    df_financials_completo = unir_financials(df_yfinance, df_simfin_clean)
+    print("Unidos datasets de financials de simFin y yfinance, dimensiones:", df_financials_completo.shape)
+
+    # Unir dataframe de precios con datos financieros
+    df_final = pd.merge(
+        df_with_info, 
+        df_financials_completo, 
+        on=['Date', 'Ticker'],
+        how='left'
+    )
+    print("Unidos datasets de precios y financials, dimensiones:", df_final.shape)
+
+    # Limpieza final
+    df_final_clean = limpieza_final(df_final)
+
+    # Se quitan del dataset los tickers sin datos financieros de yfinance
+    tickers_unicos = set(tickers_sin_datos) # se convierte en set primero por si hay tickers duplicados
+    df_final_clean = df_final_clean[~df_final_clean['Ticker'].isin(tickers_unicos)].reset_index(drop=True)
+    print(f"Eliminados tickers sin datos financieros en yfinance, quedan {len(tickers_unicos)} tickers.")
+    print("Dimensiones del dataset actualizado:", df_final_clean.shape)
+
+    # Guardar datos extraidos en fichero raw_data
+    df_final_clean.to_parquet(f"{data_folder}/raw_data.parquet")
+    print("Extracción finalizada.\nFichero 'raw_data.parquet' guardado en la carpeta",data_folder)
+
+if __name__ == "__main__":
+    main()
+
+
+# Función "legacy": extraer datos macro de Fred
+"""
+Ya no se utiliza en el código actual por su baja relevancia en la predicción,
+debido a que los valores son los mismos para todos los tickers.
+
+La dejo aquí por las dudas.
+"""
 
 '''
 from fredapi import Fred
@@ -637,23 +752,3 @@ def extraer_datos_macro(indicadores: list) -> pd.DataFrame:
             return pd.DataFrame()
 
 '''
-
-# Bloque principal para pruebas desde el terminal
-# ejecutar desde la raiz: python -m src.funcionesExtract
-
-def main():
-    # Prueba de extraer_financials()
-    #tickers_prueba = ["CVNA"]
-    #df_fundamentals = extraer_financials(tickers_prueba)
-    #df_fundamentals.to_csv(f"{data_folder}/fundamentals_test.csv")
-
-    # Prueba de extraer_simfin()
-    df = extraer_simfin()
-    print(df.head())
-
-    # Análisis del tiempo medio de retardo en la fecha de publicación
-    #tickers_prueba = ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'JPM', 'V', 'PG', 'XOM']
-    #datos_retardo = analizar_retardo_publicacion(tickers_prueba)
-
-if __name__ == "__main__":
-    main()
