@@ -25,7 +25,7 @@ Otra restricción de la cuenta básica es que no ofrece información para todos 
 
 `finDataMining` presenta actualmente dos formas de ejecución:
 * **Jupyter Notebooks:** Están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
-* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar los mismos pasos desde el terminal. Ambas formas funcionan correctamente, pero lamentablemente al ejecutar `extract.py` desde el terminal produce que `yfinance` no devuelva información financiera para muchos tickers. Aún no he encontrado forma de resolverlo sin tener que modificar todo el código de la función `extraer_financials`.
+* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar rápidamente los mismos pasos desde el terminal. Ambas formas funcionan correctamente, pero lamentablemente `yfinance` no devuelve información financiera para muchos tickers cuando se ejecuta `extract.py` desde el terminal. Aún no he encontrado forma de resolverlo sin tener que modificar todo el código de la función `extraer_financials`.
 * **Panel de Control** (planificado): Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline, así como la visualización dinámica de las variables. 
 
 También esta previsto implementar características para actualizar y gestionar la base de datos.

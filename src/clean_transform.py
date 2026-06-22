@@ -1,6 +1,7 @@
 """
 src/clean_transform.py
-Módulo auxiliar de la fase de Transformación de Datos
+Módulo auxiliar de la fase de Transformación de Datos.
+Trata las anomalías y errores detectados en el dataset raw.
 """
 import pandas as pd
 import numpy as np
