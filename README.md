@@ -7,7 +7,9 @@
 
 Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre acciones de EE.UU. Una vez procesados, normalizados y limpios, los datos son utilizados en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
 
-El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste pobres, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. De este modo, el repositorio queda preparado para iterar y probar fácilmente otros algoritmos de Machine Learning tradicional o bien modelos de redes neuronales.
+El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste pobres, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
+
+El repositorio queda preparado para iterar y probar fácilmente con otros algoritmos de Machine Learning, ya sean tradicionales o bien modelos de Redes Neuronales. De aquí en más todo lo relacionado con el entrenamiento, testeo y refinamiento de modelos de ML lo continuaré desarrollando desde un repositorio privado, a partir de los datos limpios generados por este pipeline.
 
 ## 🗄️ Fuentes de Datos
 
@@ -15,16 +17,17 @@ El pipeline de extracción obtiene los datos históricos de precios de mercado y
 
 - `yfinance`: Se obtienen los precios históricos, asi como datos financieros correspondientes a los últimos cuatro reportes trimestrales. 
 
-- `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio web (https://simfin.com/). Las instrucciones para ingresar la clave se encuentran en el fichero src/data_sources.example.py.
-Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Se define entonces un universo de 550 tickers a partir de aquellos que, teniendo una cantidad mínima de información disponible en `simFin`, presentan un mayor nivel de ventas promedio. De aquellos 550 tickers algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, contando el dataset actual con 521 compañías.
+- `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio web (https://simfin.com/). Las instrucciones para ingresar la clave en el repositorio se encuentran en el fichero src/data_sources.example.py.
+
+Otra restricción de la cuenta básica es que no ofrece información para todos los tickers. Se define entonces un universo de 550 empresas a partir de aquellas que, teniendo una cantidad mínima de información disponible en `simFin`, presentan un mayor nivel de ventas promedio. De aquellos 550 tickers algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, contando el dataset actual con un total de 521 compañías.
 
 ## 🚧 Estado del Proyecto
 
 `finDataMining` se encuentra en **fase activa de desarrollo**:
 * **Etapa actual:** Los Jupyter Notebooks provistos están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
-* **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline sin la necesidad de utilizar los Notebooks, asi como la visualización dinámica de las métricas y predicciones. Al integrar el flujo en aplicaciones de tipo `.py`, se desarrollarán características para poder actualizar y gestionar la base de datos.
+* **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline sin la necesidad de utilizar los Notebooks, asi como la visualización dinámica de las métricas y predicciones. Luego de haber integrado el flujo en aplicaciones de tipo `.py`, se desarrollarán también características para poder actualizar y gestionar la base de datos.
 
-## 🗂️ Estructura Actual del Repositorio
+## 🗂️ Estructura Actual
 
 El flujo de trabajo está modularizado en tres fases principales desarrolladas en Jupyter Notebooks, las cuales se apoyan en un script de funciones complementarias:
 
