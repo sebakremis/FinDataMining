@@ -10,6 +10,8 @@ from datetime import datetime
 import os
 import yfinance as yf
 import simfin as sf
+import time
+import random
 from src.data_sources import simfin_api_key
 from src.config import (
     periodo, intervalo, cols_resultados, cols_balance,
@@ -30,6 +32,58 @@ def clean_ticker(s):
         .replace('.', '-')   # BRK.B -> BRK-B
         .replace(' ', '') # Eliminar espacios intermedios
     )
+
+
+def extraer_simfin() -> pd.DataFrame:
+    """
+    Descarga todos los datos de simFin, sin filtrar tickers.
+    """
+    sf.set_api_key(simfin_api_key)
+    sf.set_data_dir(f'{data_folder}/simfin')
+
+    # Identificar columnas de metadatos compartidas
+    metadatos_comunes = [
+        'SimFinId', 'Currency', 'Fiscal Year', 'Fiscal Period', 
+        'Publish Date', 'Restated Date', 'Shares (Basic)', 'Shares (Diluted)',
+        'Depreciation & Amortization', 'Provision for Loan Losses'
+    ]
+
+    # Función auxiliar para procesar cualquier sector
+    def procesar_sector(func_inc, func_bal, func_cf) -> pd.DataFrame:
+        """Descarga, limpia y une los reportes de un sector específico."""
+        df_inc = func_inc(variant='quarterly')
+        df_bal = func_bal(variant='quarterly')
+        df_cf = func_cf(variant='quarterly')
+
+        # Eliminar metadatos verificando las columnas del DF actual
+        cols_drop_bal = [col for col in metadatos_comunes if col in df_bal.columns]
+        cols_drop_cf = [col for col in metadatos_comunes if col in df_cf.columns]
+        
+        df_bal_clean = df_bal.drop(columns=cols_drop_bal)
+        df_cf_clean = df_cf.drop(columns=cols_drop_cf)
+
+        # Unión usando el índice nativo ('Ticker' y 'Report Date')
+        return df_inc.join(df_bal_clean, how='outer').join(df_cf_clean, how='outer')
+
+    # Obtener los DataFrames de los 3 sectores
+    df_general = procesar_sector(sf.load_income, sf.load_balance, sf.load_cashflow)
+    df_banks = procesar_sector(sf.load_income_banks, sf.load_balance_banks, sf.load_cashflow_banks)
+    df_insurance = procesar_sector(sf.load_income_insurance, sf.load_balance_insurance, sf.load_cashflow_insurance)
+
+    # Concatenar 
+    # Al tener distinto esquema de columnas, Pandas llenará con NaN donde no aplique.
+    df_consolidado = pd.concat([df_general, df_banks, df_insurance], axis=0)
+
+    # Resetear el índice
+    df_consolidado = df_consolidado.reset_index()
+
+    # Limpieza de tickers usando la misma función auxiliar que los Tickers S&P 500
+    df_consolidado['Ticker'] = df_consolidado['Ticker'].map(clean_ticker)
+
+    # Se seleccionan los tickers del S&P500
+    #df_final = df_consolidado[df_consolidado['Ticker'].isin(tickers_validos)]
+    
+    return df_consolidado
 
 
 def inicializar_datos_simfin(update_tickers:bool=True)->pd.DataFrame:
@@ -64,8 +118,8 @@ def generar_universo_tickers(df: pd.DataFrame,
                              columna_ranking: str = 'Revenue', 
                              cantidad_tickers: int = 550):
     """
-    Se genera el fichero del universo de tickers.
-    1. Filtra los tickers que superen el umbral de filas.
+    Se genera el fichero del universo de tickers obtendidos de finSim:
+    1. Filtra los tickers que superen el umbral mínimo de trimestres disponibles.
     2. Agrupa por ticker y calcula el promedio de su métrica para ranquearlos.
     3. Selecciona el top N y guarda en CSV.
     """
@@ -94,6 +148,19 @@ def generar_universo_tickers(df: pd.DataFrame,
     df_salida.to_csv(tickers_file, index=False)
     
     print(f"Fichero de tickers guardado exitosamente. Universo total: {len(tickers_unicos)} tickers.")
+
+
+def actualizar_universo_tickers(df:pd.DataFrame)->list:
+    # Obtener los tickers únicos y convertirlos a una lista
+    tickers_universe_list = df['Ticker'].unique().tolist()
+
+    # Recrear el dataframe de tickers
+    df_tickers_universe = pd.DataFrame({'Ticker': tickers_universe_list})
+
+    # Guardar los tickers actualizados
+    df_tickers_universe.to_csv(tickers_file, index=False)
+
+    return tickers_universe_list
 
 
 def extraer_precios(tickers_list: list) -> pd.DataFrame:
@@ -154,19 +221,6 @@ def extraer_precios(tickers_list: list) -> pd.DataFrame:
 
     print("Extracción completada.")
     return df_prices
-
-
-def actualizar_universo_tickers(df:pd.DataFrame)->list:
-    # Obtener los tickers únicos y convertirlos a una lista
-    tickers_universe_list = df['Ticker'].unique().tolist()
-
-    # Recrear el dataframe de tickers
-    df_tickers_universe = pd.DataFrame({'Ticker': tickers_universe_list})
-
-    # Guardar los tickers actualizados
-    df_tickers_universe.to_csv(tickers_file, index=False)
-
-    return tickers_universe_list
 
 
 def descargar_constituents_sp(force_update=False):
@@ -275,7 +329,7 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
     - Devuelve el dataframe obtenido y la lista de tickers de los cuales no se obtuvieron datos.
     """
     dfs_lista = []
-    tickers_sin_datos = []       
+    tickers_sin_datos = []      
 
     for ticker in tickers_list:
         try:
@@ -359,6 +413,9 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
 
             if not df_temp.empty:
                 dfs_lista.append(df_temp)
+            
+            # Pausa aleatoria para no saturar la API
+            #time.sleep(random.uniform(0.5, 1.5))
 
         except Exception as e:
             print(f"Error procesando fundamentales para {ticker}: {e}")
@@ -371,58 +428,6 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
         return df_final, tickers_sin_datos
     else:
         return pd.DataFrame(), tickers_sin_datos
-
-
-def extraer_simfin() -> pd.DataFrame:
-    """
-    Descarga todos los datos de simFin, sin filtrar tickers.
-    """
-    sf.set_api_key(simfin_api_key)
-    sf.set_data_dir(f'{data_folder}/simfin')
-
-    # Identificar columnas de metadatos compartidas
-    metadatos_comunes = [
-        'SimFinId', 'Currency', 'Fiscal Year', 'Fiscal Period', 
-        'Publish Date', 'Restated Date', 'Shares (Basic)', 'Shares (Diluted)',
-        'Depreciation & Amortization', 'Provision for Loan Losses'
-    ]
-
-    # Función auxiliar para procesar cualquier sector
-    def procesar_sector(func_inc, func_bal, func_cf) -> pd.DataFrame:
-        """Descarga, limpia y une los reportes de un sector específico."""
-        df_inc = func_inc(variant='quarterly')
-        df_bal = func_bal(variant='quarterly')
-        df_cf = func_cf(variant='quarterly')
-
-        # Eliminar metadatos verificando las columnas del DF actual
-        cols_drop_bal = [col for col in metadatos_comunes if col in df_bal.columns]
-        cols_drop_cf = [col for col in metadatos_comunes if col in df_cf.columns]
-        
-        df_bal_clean = df_bal.drop(columns=cols_drop_bal)
-        df_cf_clean = df_cf.drop(columns=cols_drop_cf)
-
-        # Unión usando el índice nativo ('Ticker' y 'Report Date')
-        return df_inc.join(df_bal_clean, how='outer').join(df_cf_clean, how='outer')
-
-    # Obtener los DataFrames de los 3 sectores
-    df_general = procesar_sector(sf.load_income, sf.load_balance, sf.load_cashflow)
-    df_banks = procesar_sector(sf.load_income_banks, sf.load_balance_banks, sf.load_cashflow_banks)
-    df_insurance = procesar_sector(sf.load_income_insurance, sf.load_balance_insurance, sf.load_cashflow_insurance)
-
-    # Concatenar 
-    # Al tener distinto esquema de columnas, Pandas llenará con NaN donde no aplique.
-    df_consolidado = pd.concat([df_general, df_banks, df_insurance], axis=0)
-
-    # Resetear el índice
-    df_consolidado = df_consolidado.reset_index()
-
-    # Limpieza de tickers usando la misma función auxiliar que los Tickers S&P 500
-    df_consolidado['Ticker'] = df_consolidado['Ticker'].map(clean_ticker)
-
-    # Se seleccionan los tickers del S&P500
-    #df_final = df_consolidado[df_consolidado['Ticker'].isin(tickers_validos)]
-    
-    return df_consolidado
 
 
 def estandarizar_simfin(df_raw:pd.DataFrame, cols:list) -> pd.DataFrame:
@@ -579,32 +584,31 @@ Puedes modificar el parámetro en el fichero src/config.py
 
 
 # Bloque principal (Se replica el flujo del Notebook Extraccion)
+# El codigo funciona de las dos formas, lamentablemente al ejecutar desde el terminal, 
+# yfinance no devuelve información financiera para muchos tickers.
+# Aun no he encontrado una forma de resolverlo sin tener que modificar todo el código.
+
 # Se ejecuta desde la raiz: python -m src.extract
 
 def main():
-    # Importar librerías
-    import pandas as pd
-    from src.config import data_folder, tickers_file
-
     # Extraer datos de simFin
     df_simfin_unfiltered = inicializar_datos_simfin(update_tickers=True)
-    print("Datos extraidos de simFin, dimensiones:", df_simfin_unfiltered.shape)
+    print("Datos extraidos de simFin. Dimensiones:", df_simfin_unfiltered.shape)
 
-    # Se lee el fichero con los tickers incluidos en el proyecto
+    # Se lee el fichero con los tickers incluídos en el dataset de simFin
     df_tickers_universe = pd.read_csv(tickers_file)
     tickers_universe_list = df_tickers_universe['Ticker'].tolist()
     tickers_unique = list(set(tickers_universe_list)) # se asegura que no hayan duplicados
-    print("Universo de tickers extraido, cantidad de tickers:",len(tickers_unique))
 
     # Extraer precios de los tickers y del índice SPY 
-    print("Extrayendo precios de yfinance, demora unos minutos.")
+    print("Extrayendo precios de yfinance, demora unos minutos...")
     df_prices = extraer_precios(tickers_unique)
 
     # Se extrae precio del Índice de Mercado para usar en cálculos y se guarda en fichero 
     df_index = extraer_precios(['SPY'])
     df_index.to_parquet(f"{data_folder}/market_index.parquet")
 
-    print("Extraidos precios del universo de tickers y del indice.")
+    print("Extraídos precios del universo de tickers y del índice.")
     print("Dimensiones de df_precios:", df_prices.shape)
     print("Dimensiones de df_index:", df_index.shape)
 
@@ -620,10 +624,10 @@ def main():
     ruta_sp500 = descargar_constituents_sp(force_update=False) 
 
     # Cargar y limpiar datos de constituents
+    print("Cargando los tickers del S&P 500.")
     df_tickers_sp_raw = pd.read_csv(ruta_sp500)
     df_tickers_sp = limpiar_constituents_sp(df_tickers_sp_raw)
-    print("Cargados los tickers del S&P 500 del fichero.")
-    print("Cantidad de tickers:", df_tickers_sp['Ticker'].nunique())
+    print("Cantidad de tickers en el índice:", df_tickers_sp['Ticker'].nunique())
 
     # Unir df_prices y df_tickers
     df_merged = pd.merge(
@@ -632,12 +636,12 @@ def main():
         on= 'Ticker',
         how= 'left'
     )
-    print("Unidos precios con DateAdded del indice S&P500, dimensiones del dataset:", df_merged.shape)
+    print("Unidos precios con 'DateAdded' del índice S&P500. Dimensiones:", df_merged.shape)
 
     # Extraer info de sector e industria
-    print("Extrayendo info de yfinance. Demora unos minutos.")
+    print("Extrayendo info de 'Industry' y 'Sector' de yfinance. Demora unos minutos...")
     df_info = extraer_info(tickers_list_updated)
-    print("Extracción de info finalizada, dimensiones:",df_info.shape)
+    print("Extracción de info finalizada. Dimensiones:",df_info.shape)
 
     # Se unen los dataframes
     df_with_info = pd.merge(
@@ -646,20 +650,25 @@ def main():
         on= 'Ticker',
         how= 'left'
     )
-    print("Unidos precios e info, dimensiones del dataset:", df_with_info.shape)
+    print("Unidos precios e info. Dimensiones:", df_with_info.shape)
 
     # Extraer datos financieros de yfinance: ultimos 4 trimestres
-    print("Extrayendo datos financieros de yfinance, demora varios minutos.")
+    print("Extrayendo datos financieros de yfinance. Demora varios minutos...")
     df_yfinance, tickers_sin_datos = extraer_financials(tickers_list_updated, aproximar_fechas = True)
-    print("Extracción de financials de yfinance finalizada, dimensiones del dataset:", df_yfinance.shape)
+    print("Extracción de financials de yfinance finalizada. Dimensiones:", df_yfinance.shape)
 
+    # --- NUEVA VALIDACIÓN DE SEGURIDAD ---
+    if df_yfinance.empty:
+        print("Error Crítico: No se han podido extraer datos de yfinance. Se aborta la ejecución para evitar corrupción de datos.")
+        return # Sale de la función main
+    # -------------------------------------
 
     # Definir columnas a mantener en simFin para que coincidan y estandarizar antes de unir
-    cols_yfinance = df_yfinance.columns
+    cols_yfinance = df_yfinance.columns.tolist()
     df_simfin_clean = estandarizar_simfin(df_simfin, cols_yfinance)
 
     df_financials_completo = unir_financials(df_yfinance, df_simfin_clean)
-    print("Unidos datasets de financials de simFin y yfinance, dimensiones:", df_financials_completo.shape)
+    print("Unidos datasets de financials de simFin y yfinance. Dimensiones:", df_financials_completo.shape)
 
     # Unir dataframe de precios con datos financieros
     df_final = pd.merge(
@@ -668,7 +677,7 @@ def main():
         on=['Date', 'Ticker'],
         how='left'
     )
-    print("Unidos datasets de precios y financials, dimensiones:", df_final.shape)
+    print("Unidos datasets de precios y financials. Dimensiones:", df_final.shape)
 
     # Limpieza final
     df_final_clean = limpieza_final(df_final)
@@ -676,12 +685,13 @@ def main():
     # Se quitan del dataset los tickers sin datos financieros de yfinance
     tickers_unicos = set(tickers_sin_datos) # se convierte en set primero por si hay tickers duplicados
     df_final_clean = df_final_clean[~df_final_clean['Ticker'].isin(tickers_unicos)].reset_index(drop=True)
-    print(f"Eliminados tickers sin datos financieros en yfinance, quedan {len(tickers_unicos)} tickers.")
+    tickers_finales = actualizar_universo_tickers(df_final_clean)
+    print(f"Eliminados tickers sin datos financieros en yfinance, quedan {len(tickers_finales)} tickers.")
     print("Dimensiones del dataset actualizado:", df_final_clean.shape)
 
     # Guardar datos extraidos en fichero raw_data
     df_final_clean.to_parquet(f"{data_folder}/raw_data.parquet")
-    print("Extracción finalizada.\nFichero 'raw_data.parquet' guardado en la carpeta",data_folder)
+    print(f"Extracción finalizada.\nFichero 'raw_data.parquet' guardado en la carpeta {data_folder}")
 
 if __name__ == "__main__":
     main()

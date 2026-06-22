@@ -10,7 +10,8 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
-from src.config import cols_balance, cols_cashflow, cols_resultados
+from src.clean_transform import limpiar_data
+from src.config import cols_balance, cols_cashflow, cols_resultados, data_folder
 
 def financieras_en_millones(df:pd.DataFrame)->pd.DataFrame:
     cols = obtener_cols_financieras(incluirTTM=False)
@@ -575,10 +576,133 @@ def plot(col):
         cat_plot(col).show()
 
 
-# Bloque principal para pruebas desde el terminal
+# Bloque principal (Se replica el flujo del Notebook Transformacion)
+# Se ejecuta desde la raiz: python -m src.transform
 
 def main():
-    pass
+    # Abrir archivo raw_data
+    df = pd.read_parquet(f"{data_folder}/raw_data.parquet")
+
+    # Se asegura el ordenamiento por fecha
+    df = df.sort_values(by='Date').reset_index(drop=True)
+
+    # Se expresan las columnas financieras y volumen en millones:
+    df = financieras_en_millones(df)
+
+    # Limpieza
+    df_clean = limpiar_data(df)
+
+    print("Limpieza de errores finalizada.")
+    # imputar equivalencias financieras
+    df_acc_imputed = imputar_equivalencias_financieras(df_clean)
+
+    # Crear feature YearsSinceAdded
+    #  Pasar DateAdded a formato datetime, los NaN se vuelven NaT (not a time)
+    df_acc_imputed['DateAdded'] = pd.to_datetime(df_acc_imputed['DateAdded'], errors='coerce')
+    # Convertir a YearsSinceAdded, aqui los nulos regresan a NaN
+    df_acc_imputed['YearsSinceAdded'] = round(((pd.Timestamp.now() - df_acc_imputed['DateAdded']).dt.days / 365.25), 0)
+
+    # 3. Se asignan a cero años los tickers que no pertenecen al Índice S&P 500
+    df_acc_imputed['YearsSinceAdded'] = df_acc_imputed['YearsSinceAdded'].fillna(0)
+
+    # Eliminar la columna original
+    df_acc_imputed.drop('DateAdded', axis=1, inplace=True)
+
+    # Imputar por medias moviles
+    df_fin_imputed = imputar_numericas(df_acc_imputed)
+
+    # Forward fill y Back fill
+    df_fin_imputed = aplicar_fill(df_fin_imputed, limite=None)
+
+    # Transformar variables TTM
+    df_ttm = transformar_flujos_a_ttm(df_fin_imputed)
+
+    # Calcular metricas
+    df_with_metrics, crecimiento_cols = calcular_metricas(df_ttm)
+
+    # Imputacion transversal de columnas de crecimiento anual y trimestral
+    df_with_metrics = imputar_transversal(df_with_metrics, crecimiento_cols)
+
+    # Calcular retornos, varianza y covarianza con el mercado
+    df_index = pd.read_parquet(f"{data_folder}/market_index.parquet")
+    df_with_features = calcular_retornos(df_with_metrics, df_index)
+
+    # Imputación final
+    # Medias moviles
+    df_imputed = imputar_numericas(df_with_features)
+   
+    # Se aplican los fills sobre los missings que queden
+    df_imputed = aplicar_fill(df_imputed,None)
+
+    print("Imputación finalizada.")
+    # Transformaciones
+    # Se calculan tamaños relativos: RelativeAssets y RelativeRevenue
+    df_transformed = calcular_relative_size(df_imputed)
+
+    # Se expresan columnas de totales de mercado en millones
+    cols = [
+        'TotalMarketAssets', 
+        'TotalMarketRevenue'
+        ]
+
+    for col in cols:
+        df_transformed[col] = df_transformed[col] / 10**6
+
+    # Convertir Sector y Industry a tipo category
+    df_transformed['Sector'] = df_transformed['Sector'].astype('category')
+    df_transformed['Industry'] = df_transformed['Industry'].astype('category')
+
+    # Transformaciones logarítmicas
+
+    columnas_a_transformar = [ 
+        'Volume',
+        'CapExToRevenue',
+        'DebtToEquity',
+        'QuarterlyVariance'
+        ]
+    for columna in columnas_a_transformar:
+        df_transformed[columna] = df_transformed[columna].fillna(0)
+        df_transformed[f'{columna}_log'] = np.log1p(df_transformed[columna])
+        df_transformed.drop(columna, axis=1, inplace=True)
+    
+    # Definir columnas que saltean la "winsorización"
+    cols_fin_clean = obtener_cols_financieras(incluirTTM=True)
+
+    columnas_intactas = cols_fin_clean + [
+        # Variables de precio (posibles label)
+        'Close',
+        'Open',    
+        'TrailingPE',
+        'EnterpriseToEbitda',
+        'PriceToBook',
+        # Otras
+        'Date', 
+        'Ticker',
+        'TotalMarketRevenue',
+        'TotalMarketAssets'       
+        ]
+
+    # Separar el dataset
+    df_passthrough = df_transformed[columnas_intactas].copy()
+    df_transformed_features = df_transformed.drop(columns=columnas_intactas)
+
+    # Gestión de outliers
+    df_cont_transformed = df_transformed_features.select_dtypes(include="number")
+    df_winsor = df_cont_transformed.apply(lambda x: gestiona_outliers(x, clas='winsor'))
+
+    print("Gestión de outliers finalizada.")
+    # Concatenación final
+    df_non_numeric_transformed = df_transformed_features.select_dtypes(exclude='number')
+    # Se unen variables contínuas transformadas y variables no numéricas
+    df_combined = pd.concat([df_non_numeric_transformed, df_winsor], axis=1)
+   
+    # Unir con las columnas que fueron salteadas
+    df_final = pd.concat([df_passthrough, df_combined], axis=1)
+
+    # Guardar datos extraidos en fichero clean_data
+    df_final.to_parquet(f"{data_folder}/clean_data.parquet")
+    print(f"Transformación finalizada.\nFichero 'clean_data.parquet' guardado en la carpeta {data_folder}.")
+    print("Dimensión de datos finales:", df_final.shape)
 
 if __name__ == "__main__":
     main()

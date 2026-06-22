@@ -23,13 +23,14 @@ Otra restricción de la cuenta básica es que no ofrece información para todos 
 
 ## 🚧 Estado del Proyecto
 
-`finDataMining` se encuentra en **fase activa de desarrollo**:
-* **Etapa actual:** Los Jupyter Notebooks provistos están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
-* **Evolución planificada:** Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline sin la necesidad de utilizar los Notebooks, asi como la visualización dinámica de las métricas y predicciones. Luego de haber integrado el flujo en aplicaciones de tipo `.py`, se desarrollarán también características para poder actualizar y gestionar la base de datos.
+`finDataMining` presenta actualmente dos formas de ejecución:
+* **Jupyter Notebooks:** Están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
+* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar los mismos pasos desde el terminal. Ambas formas funcionan correctamente, pero lamentablemente al ejecutar `extract.py` desde el terminal produce que `yfinance` no devuelva información financiera para muchos tickers. Aún no he encontrado forma de resolverlo sin tener que modificar todo el código de la función `extraer_financials`.
+* **Panel de Control** (planificado): Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline, así como la visualización dinámica de las variables. 
+
+También esta previsto implementar características para actualizar y gestionar la base de datos.
 
 ## 🗂️ Estructura Actual
-
-El flujo de trabajo está modularizado en tres fases principales desarrolladas en Jupyter Notebooks, las cuales se apoyan en un script de funciones complementarias:
 
 ```text
 FINDATAMINING/
@@ -43,6 +44,7 @@ FINDATAMINING/
 │   ├── tickers_universe.csv         # Se guardan los tickers sobre los cuales exiten datos
 ├── src/                             # Sub-directorio con los módulos de funciones auxiliares
 │   ├── __init__.py                  # Fichero vacío, inicializa la carpeta como paquete
+│   ├── clean_transform.py           # Módulo auxiliar de limpieza de datos para la fase de transformación
 │   ├── config.py                    # Configuración global del proyecto #data_sources.example.py
 │   ├── data_sources.example.py      # Fichero ejemplo para gestionar la clave API de simFin
 │   ├── extract.py                   # Módulo de la fase de extracción
