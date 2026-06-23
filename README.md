@@ -14,8 +14,6 @@ Cuenta con tres fases:
 
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste pobres, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
 
-El repositorio queda preparado para iterar y probar fácilmente con otros algoritmos de Machine Learning, ya sean tradicionales o bien modelos de Redes Neuronales. De aquí en más todo lo relacionado con el entrenamiento, testeo y refinamiento de modelos de ML lo continuaré desarrollando desde un repositorio privado, a partir de los datos limpios generados por este pipeline.
-
 ## 🗄️ Fuentes de Datos
 
 El pipeline de extracción obtiene datos históricos de precios de mercado y los balances corporativos disponibles de forma libre y gratuita, a través de las librerías: 
