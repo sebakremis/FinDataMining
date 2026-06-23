@@ -40,3 +40,10 @@ def calcular_acceleration_features(df:pd.DataFrame, cols:list, reemplazar:bool= 
             continue
 
     return df
+
+def calcular_lag(df:pd.DataFrame, cols:list,q:int=4)->pd.DataFrame:
+    for col in cols:
+        df[col+f'_Lag{q}'] = df[col].shift(4)
+
+    df.drop(columns=cols, inplace=True)
+    return df
