@@ -12,7 +12,7 @@ Cuenta con tres fases:
 * *Transformación*: limpieza de errores, imputación de valores perdidos, transformaciones y gestión de outliers.
 * *Modelado*: feature engineering, aplicación de modelo *RandomForest* con datos completos, prueba de validación cruzada con partición de series temporales, evaluación de resultados, exportación de datos y predicciones, explicabilidad del modelo y optimización de hiper-parámetros.
 
-El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste pobres, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
+El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste bajas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
 
 ## 🗄️ Fuentes de Datos
 
