@@ -385,39 +385,44 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
 def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4, min_periodos: int = 2) -> pd.DataFrame:
     """
-    Calcula retornos mensuales, varianza del activo y covarianza con el mercado.
+    Calcula retornos, varianza del activo y covarianza con el mercado.
+    Aplica un rezago (lag) de 1 periodo para evitar Data Leakage.
     """       
     ticker_mercado = df_index['Ticker'].iloc[0]
     
     # Preparar datos y calcular retornos
     df_unido = pd.concat([df, df_index], ignore_index=True)
     df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Open').sort_index()
-    df_retornos = df_pivot.pct_change(fill_method=None).dropna(how='all')
+    
+    # pct_change usa (t / t-1) - 1
+    df_retornos = df_pivot.pct_change(fill_method=None)
     
     retornos_mercado = df_retornos[ticker_mercado]
     df_activos = df_retornos.drop(columns=[ticker_mercado])
     
-    # Calcular estadísticas móviles (Features)
+    # Calcular estadísticas móviles
     varianzas_activos = df_activos.rolling(window=ventana, min_periods=min_periodos).var()
     covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
     
-    # Transformar cada matriz a formato largo (melt)
-    df_ret_long = df_activos.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='QuarterlyReturn'
+    # Aplicar lag de 1 periodo (Lo que pasó en t, se mueve a t+1 para ser usado como Feature)
+    df_activos_lag = df_activos.shift(1)
+    varianzas_activos_lag = varianzas_activos.shift(1)
+    covarianzas_lag = covarianzas.shift(1)
+    
+    # Transformar cada matriz a formato largo (melt) usando los DataFrames rezagados
+    df_ret_long = df_activos_lag.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='QuarterlyReturn_Lag1'
     )
-    df_var_long = varianzas_activos.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='QuarterlyVariance'
+    df_var_long = varianzas_activos_lag.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='QuarterlyVariance_Lag1'
     )
-    df_cov_long = covarianzas.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='MarketCovariance'
+    df_cov_long = covarianzas_lag.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MarketCovariance_Lag1'
     )
     
     # Consolidar todas las features en un solo DataFrame
     df_features = df_ret_long.merge(df_var_long, on=['Date', 'Ticker'])
     df_features = df_features.merge(df_cov_long, on=['Date', 'Ticker'])
-    
-    # Limpiar registros sin suficientes datos (NaNs de la ventana inicial)
-    df_features = df_features.dropna(subset=['QuarterlyVariance', 'MarketCovariance']).reset_index(drop=True)
     
     # Redondear para mayor legibilidad
     df_features = df_features.round(6)
@@ -477,6 +482,9 @@ def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
     # Dividir los valores individuales por el total del mercado
     df['RelativeAssets'] = assets_clean / df['TotalMarketAssets']
     df['RelativeRevenue'] = revenue_clean / df['TotalMarketRevenue']
+
+    # Se eliminan las columnas de totales
+    df.drop(columns=['TotalMarketAssets', 'TotalMarketRevenue'], inplace=True)
    
     return df
 
@@ -627,6 +635,10 @@ def main():
     df_index = pd.read_parquet(f"{data_folder}/market_index.parquet")
     df_with_features = calcular_retornos(df_with_metrics, df_index)
 
+    # Se aplica lag de 1 período a volumen para evitar Data Leakage
+    df_with_features['Volume_Lag1'] = df_with_features['Volume'].shift(1)
+    df_with_features.drop('Volume', axis=1, inplace=True)
+
     # Imputación final
     # Medias moviles
     df_imputed = imputar_numericas(df_with_features)
@@ -639,15 +651,6 @@ def main():
     # Se calculan tamaños relativos: RelativeAssets y RelativeRevenue
     df_transformed = calcular_relative_size(df_imputed)
 
-    # Se expresan columnas de totales de mercado en millones
-    cols = [
-        'TotalMarketAssets', 
-        'TotalMarketRevenue'
-        ]
-
-    for col in cols:
-        df_transformed[col] = df_transformed[col] / 10**6
-
     # Convertir Sector y Industry a tipo category
     df_transformed['Sector'] = df_transformed['Sector'].astype('category')
     df_transformed['Industry'] = df_transformed['Industry'].astype('category')
@@ -655,21 +658,21 @@ def main():
     # Transformaciones logarítmicas
 
     columnas_a_transformar = [ 
-        'Volume',
+        'Volume_Lag1',
         'CapExToRevenue',
         'DebtToEquity',
-        'QuarterlyVariance'
+        'QuarterlyVariance_Lag1'
         ]
     for columna in columnas_a_transformar:
         df_transformed[columna] = df_transformed[columna].fillna(0)
-        df_transformed[f'{columna}_log'] = np.log1p(df_transformed[columna])
+        df_transformed[f'{columna}_Log1p'] = np.log1p(df_transformed[columna])
         df_transformed.drop(columna, axis=1, inplace=True)
     
     # Definir columnas que saltean la "winsorización"
     cols_fin_clean = obtener_cols_financieras(incluirTTM=True)
 
     columnas_intactas = cols_fin_clean + [
-        # Variables de precio (posibles label)
+        # Variables de precio y ratios
         'Close',
         'Open',    
         'TrailingPE',
@@ -677,9 +680,7 @@ def main():
         'PriceToBook',
         # Otras
         'Date', 
-        'Ticker',
-        'TotalMarketRevenue',
-        'TotalMarketAssets'       
+        'Ticker'     
         ]
 
     # Separar el dataset
