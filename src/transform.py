@@ -486,7 +486,7 @@ def gestiona_outliers(col,clas = 'check'):
      Función para detectar y gestionar outliers en una columna numérica.
      """
     
-     print(col.name)
+     #print(col.name)
      # Condición de asimetría y aplicación de criterio 1 según el caso
      if abs(col.skew()) < 1:
         criterio1 = abs((col-col.mean())/col.std())>3

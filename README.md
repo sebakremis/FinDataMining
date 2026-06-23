@@ -7,6 +7,11 @@
 
 Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre acciones que cotizan en EE.UU. Una vez procesados, normalizados y limpios, los datos son utilizados en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
 
+Cuenta con tres fases:
+* *Extracción*: obtención de datos a través de APIs.
+* *Transformación*: limpieza de errores, imputación de valores perdidos, transformaciones y gestión de outliers.
+* *Modelado*: feature engineering, aplicación de modelo *RandomForest* con datos completos, prueba de validación cruzada con partición de series temporales, evaluación de resultados, exportación de datos y predicciones, explicabilidad del modelo y optimización de hiper-parámetros.
+
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste pobres, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
 
 El repositorio queda preparado para iterar y probar fácilmente con otros algoritmos de Machine Learning, ya sean tradicionales o bien modelos de Redes Neuronales. De aquí en más todo lo relacionado con el entrenamiento, testeo y refinamiento de modelos de ML lo continuaré desarrollando desde un repositorio privado, a partir de los datos limpios generados por este pipeline.
@@ -25,7 +30,7 @@ Otra restricción de la cuenta básica de `simFin` es que no ofrece información
 
 `finDataMining` presenta actualmente dos formas de ejecución:
 * **Jupyter Notebooks:** Están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
-* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar rápidamente los mismos pasos desde el terminal. Ambas formas funcionan correctamente, pero lamentablemente `yfinance` no devuelve información financiera para muchos tickers cuando se ejecuta `extract.py` desde el terminal. Aún no he encontrado forma de resolverlo sin tener que modificar todo el código de la función `extraer_financials`.
+* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar rápidamente los mismos pasos desde el terminal. Ambas formas funcionan correctamente, pero a veces `yfinance` no devuelve información financiera para muchos tickers cuando se ejecuta `extract.py` desde el terminal.
 * **Panel de Control** (planificado): Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline, así como la visualización dinámica de las variables. 
 
 También esta previsto implementar características para actualizar y gestionar la base de datos.
