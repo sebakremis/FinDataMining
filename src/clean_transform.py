@@ -33,12 +33,13 @@ def limpiar_data(df:pd.DataFrame)->pd.DataFrame:
     condicion_deuda_negativa = (clean_df['CurrentDebt'] < 0) | (clean_df['LongTermDebt'] < 0)
     clean_df = clean_df[~condicion_deuda_negativa].reset_index(drop=True)
 
-    # Caso 4: Reemplazar por cero caso con amortización negativa de yfinance (tiene EBITDA)
-    condicion_depre_negativa_hay_ebitda = (clean_df['DepreciationAndAmortization'] < 0) & (clean_df['EBITDA'].notna())
-    clean_df.loc[condicion_depre_negativa_hay_ebitda,'DepreciationAndAmortization'] = 0
+    # Caso 4: Reemplazar por cero caso con amortización negativa de yfinance
+    condicion_depre_negativa_yfinance = (df['DepreciationAndAmortization'] < 0) & (df['FinancialsSource']=='yfinance')
+    df.loc[condicion_depre_negativa_yfinance,'DepreciationAndAmortization'] = 0
 
-    # Caso 5: Convertir a positivos los negativos que vienen de simFin (el resto)
-    clean_df['DepreciationAndAmortization'] = clean_df['DepreciationAndAmortization'].abs()
+    # Caso 5: Convertir a positivos los negativos que vienen de simFin
+    condicion_depre_negativa_simfin = (df['DepreciationAndAmortization'] < 0) & (df['FinancialsSource']=='simFin')
+    df.loc[condicion_depre_negativa_simfin, 'DepreciationAndAmortization'] = df.loc[condicion_depre_negativa_simfin, 'DepreciationAndAmortization'].abs()
 
     return clean_df
 
