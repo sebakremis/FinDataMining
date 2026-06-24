@@ -13,7 +13,7 @@ import plotly.express as px
 from src.clean_transform import limpiar_data
 from src.config import cols_balance, cols_cashflow, cols_resultados, data_folder
 
-def financieras_en_millones(df:pd.DataFrame)->pd.DataFrame:
+def columnas_en_millones(df:pd.DataFrame)->pd.DataFrame:
     cols = obtener_cols_financieras(incluirTTM=False)
     cols.append('Volume') # se convierte también el volumen
     cols.append('CashAndCashEquivalents') # no está en la lista de columnas de yfinance
@@ -595,7 +595,7 @@ def main():
     df = df.sort_values(by='Date').reset_index(drop=True)
 
     # Se expresan las columnas financieras y volumen en millones:
-    df = financieras_en_millones(df)
+    df = columnas_en_millones(df)
 
     # Limpieza
     df_clean = limpiar_data(df)
