@@ -731,7 +731,9 @@ def main():
         'Volume_Lag1',
         'CapExToRevenue',
         'DebtToEquity',
-        'QuarterlyVariance_Lag1'
+        'QuarterlyVariance_Lag1',
+        'MarketCap',
+        'EnterpriseValue'
         ]
     for columna in columnas_a_transformar:
         df_transformed[columna] = df_transformed[columna].fillna(0)
