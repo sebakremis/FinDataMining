@@ -406,27 +406,32 @@ def estandarizar_simfin(df_raw:pd.DataFrame, cols:list) -> pd.DataFrame:
     return df
 
 
-def unir_financials(df_yfinance:pd.DataFrame, df_simfin:pd.DataFrame)->pd.DataFrame:
+def unir_financials(df_yfinance: pd.DataFrame, df_simfin: pd.DataFrame) -> pd.DataFrame:
     # Eliminar posibles duplicados INTERNOS en cada DataFrame antes de cruzarlos
-    # Se mantiene el último como válido (dato reexpresado/corregido)   
     df_yf_unique = df_yfinance.drop_duplicates(subset=['Ticker', 'Date'], keep='last')
     df_sf_unique = df_simfin.drop_duplicates(subset=['Ticker', 'Date'], keep='last') 
 
-    # Convertir 'Ticker' y 'Date' en el índice de ambos DataFrames temporalmente
-    df_sf_idx = df_sf_unique.set_index(['Ticker', 'Date'])
+    # Convertir 'Ticker' y 'Date' en el índice temporalmente
     df_yf_idx = df_yf_unique.set_index(['Ticker', 'Date'])
+    df_sf_idx = df_sf_unique.set_index(['Ticker', 'Date'])
+
+    # Identificar solapamientos (intersección de índices)
+    idx_solapados = df_yf_idx.index.intersection(df_sf_idx.index)
 
     # Aplicar combine_first para tratar el solapamiento
     # Toma el valor de yfinance, si fuese NaN lo intenta rellenar con SimFin
     df_financials_idx = df_yf_idx.combine_first(df_sf_idx)
 
+    # Ajustar la columna 'FinancialsSource' para registros mezclados
+    # Si un registro estaba en ambos, indicamos que contiene datos combinados
+    if 'FinancialsSource' in df_financials_idx.columns:
+        df_financials_idx.loc[idx_solapados, 'FinancialsSource'] = 'yfinance + simFin'
+
     # Se devuelven 'Ticker' y 'Date' como columnas normales
     df_unido = df_financials_idx.reset_index()
 
     # Auditoría de solapamientos
-    mascara_duplicados = df_unido.duplicated(subset=['Ticker', 'Date'], keep=False)
-    df_solapado = df_unido[mascara_duplicados]
-    print(f"Se han encontrado {len(df_solapado)} filas con Ticker y Date solapados.")
+    print(f"Se han encontrado {len(idx_solapados)} filas con Ticker y Date solapados (presentes en ambas fuentes).")
 
     return df_unido
 
@@ -561,6 +566,10 @@ def main():
     # Extraer datos de simFin y generar lista de tickers según los criterios
     df_simfin_unfiltered = extraer_simfin()
     tickers_universe_list = generar_universo_tickers(df_simfin_unfiltered)
+
+    # Se agrega columna 'FinancialsSource' para indicar que los datos provienen de simFin
+    df_simfin_unfiltered['FinancialsSource'] = 'simFin'
+
     print("Datos extraidos de simFin, dimensiones:", df_simfin_unfiltered.shape)
 
     # Extraer precios de los tickers y del índice SPY 
@@ -618,6 +627,10 @@ def main():
     # Extraer datos financieros de yfinance: ultimos 4 trimestres
     print("Extrayendo datos financieros de yfinance. Demora varios minutos...")
     df_yfinance, tickers_sin_datos = extraer_financials(tickers_list_updated, aproximar_fechas = True)
+
+    # Se agrega columna 'FinancialsSource' para indicar que los datos provienen de yfinance
+    df_yfinance['FinancialsSourse'] = 'yfinance'
+
     print("Extracción de financials de yfinance finalizada. Dimensiones:", df_yfinance.shape)
 
     # --- VALIDACIÓN DE SEGURIDAD ---
