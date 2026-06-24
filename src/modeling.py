@@ -20,30 +20,3 @@ def obtener_metricas(y_real, y_pred, nombre_modelo):
         'RMSE': np.sqrt(mse),
         'R2': r2_score(y_real, y_pred)
     }
-
-
-def calcular_acceleration_features(df:pd.DataFrame, cols:list, reemplazar:bool= False)-> pd.DataFrame:
-    for col in cols:
-        try:
-            # Se extrae el nombre de la variable
-            feature_name = col.split('_')[0]
-
-            # Calcular Acceleration: se define como la tasa de cambio a corto plazo menos la de largo.
-            df[f'{feature_name}_Acceleration'] = df[f'{feature_name}_QoQ'] - df[f'{feature_name}_YoY']
-
-            if reemplazar:
-                # Se elimina la columna trimestral
-                df = df.drop(f'{feature_name}_QoQ', axis=1)           
-
-        except Exception as e:
-            print(f"Error procesando columna {col}: {e}")
-            continue
-
-    return df
-
-def calcular_lag(df:pd.DataFrame, cols:list,q:int=4)->pd.DataFrame:
-    for col in cols:
-        df[col+f'_Lag{q}'] = df[col].shift(4)
-
-    df.drop(columns=cols, inplace=True)
-    return df

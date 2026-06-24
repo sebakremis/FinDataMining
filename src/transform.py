@@ -10,12 +10,28 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
-from src.clean_transform import limpiar_data
+from src.clean_transform import corregir_anomalias
 from src.config import cols_balance, cols_cashflow, cols_resultados, data_folder
 
+def limpiar_cadenas(texto):
+    if not isinstance(texto, str): # Por si hay valores nulos (NaN)
+        return texto
+    
+    # Se reemplaza el guión por espacio
+    texto = texto.replace('-', ' ')
+
+    # Dividir en palabras
+    palabras = texto.split()
+
+    # Procesar cada palabra: se cambia a 'And' si es '&', si no, se capitaliza
+    palabras_procesadas = ['And' if p == '&' else p.capitalize() for p in palabras]
+    # Unimos todo sin espacios
+    return ' '.join(palabras_procesadas)
+
+
 def columnas_en_millones(df:pd.DataFrame)->pd.DataFrame:
-    cols = obtener_cols_financieras(incluirTTM=False)
-    cols.append('Volume') # se convierte también el volumen
+    cols = obtener_cols_financieras(incluirTTM=True)
+    cols.append('Volume_Lag1') # se convierte también el volumen
     cols.append('CashAndCashEquivalents') # no está en la lista de columnas de yfinance
     set_cols = set(cols)
     df[list(set_cols)] = df[list(set_cols)] / 10**6
@@ -383,6 +399,29 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return df_metrics, crecimiento_cols
 
 
+def calcular_acceleration(df:pd.DataFrame, cols:list, reemplazar:bool= False)-> pd.DataFrame:
+    for col in cols:
+        try:
+            # Se extrae el nombre de la variable
+            feature_name = col.split('_')[0]
+
+            # Calcular Acceleration: se define como la tasa de cambio a corto plazo menos la de largo.
+            df[f'{feature_name}_Acceleration'] = df[f'{feature_name}_QoQ'] - df[f'{feature_name}_YoY']        
+
+        except Exception as e:
+            print(f"Error procesando columna {col}: {e}")
+            continue
+
+    return df
+
+def calcular_lag(df:pd.DataFrame, cols:list,q:int=4)->pd.DataFrame:
+    for col in cols:
+        df[col+f'_Lag{q}'] = df[col].shift(4)
+
+    df.drop(columns=cols, inplace=True)
+    return df
+
+
 def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4, min_periodos: int = 2) -> pd.DataFrame:
     """
     Calcula retornos, varianza del activo y covarianza con el mercado.
@@ -594,62 +633,93 @@ def main():
     # Se asegura el ordenamiento por fecha
     df = df.sort_values(by='Date').reset_index(drop=True)
 
-    # Se expresan las columnas financieras y volumen en millones:
-    df = columnas_en_millones(df)
+    # Limpieza de datos
 
-    # Limpieza
-    df_clean = limpiar_data(df)
+    # Limpiar cadenas de texto en Sector y Industry
+    df['Industry'] = df['Industry'].apply(limpiar_cadenas)
+    df['Sector'] = df['Sector'].apply(limpiar_cadenas)
+
+    # Corrección de anomalías
+    df_clean = corregir_anomalias(df)
 
     print("Limpieza de errores finalizada.")
+
+    # Tratamiento Inicial de Missings
+
+    # Se imputa el missing en Industry y Sector
+    condicion = df_clean['Ticker'] == 'MKSI'
+    df_clean.loc[condicion, 'Sector'] = 'Technology'
+    df_clean.loc[condicion, 'Industry'] = 'Scientific & Technical Instruments'
+
     # imputar equivalencias financieras
-    df_acc_imputed = imputar_equivalencias_financieras(df_clean)
+    df_fin_imputed = imputar_equivalencias_financieras(df_clean)
 
-    # Crear feature YearsSinceAdded
-    #  Pasar DateAdded a formato datetime, los NaN se vuelven NaT (not a time)
-    df_acc_imputed['DateAdded'] = pd.to_datetime(df_acc_imputed['DateAdded'], errors='coerce')
-    # Convertir a YearsSinceAdded, aqui los nulos regresan a NaN
-    df_acc_imputed['YearsSinceAdded'] = round(((pd.Timestamp.now() - df_acc_imputed['DateAdded']).dt.days / 365.25), 0)
+    # Se imputan las columnas financieras, por su media o mediana móvil según sus asimetrías
+    df_fin_imputed = imputar_numericas(df_fin_imputed)
 
-    # 3. Se asignan a cero años los tickers que no pertenecen al Índice S&P 500
-    df_acc_imputed['YearsSinceAdded'] = df_acc_imputed['YearsSinceAdded'].fillna(0)
-
-    # Eliminar la columna original
-    df_acc_imputed.drop('DateAdded', axis=1, inplace=True)
-
-    # Imputar por medias moviles
-    df_fin_imputed = imputar_numericas(df_acc_imputed)
 
     # Forward fill y Back fill
     df_fin_imputed = aplicar_fill(df_fin_imputed, limite=None)
 
-    # Transformar variables TTM
-    df_ttm = transformar_flujos_a_ttm(df_fin_imputed)
+    print("Tratamiento Inicial de Missings finalizado.")
 
-    # Calcular metricas
-    df_with_metrics, crecimiento_cols = calcular_metricas(df_ttm)
+    # Feature Engineering
 
-    # Imputacion transversal de columnas de crecimiento anual y trimestral
-    df_with_metrics = imputar_transversal(df_with_metrics, crecimiento_cols)
+    # Variables TTM
+    df_with_features = transformar_flujos_a_ttm(df_fin_imputed)
 
-    # Calcular retornos, varianza y covarianza con el mercado
+    # Crear feature YearsSinceAdded
+    #  Pasar DateAdded a formato datetime, los NaN se vuelven NaT (not a time)
+    df_with_features['DateAdded'] = pd.to_datetime(df_with_features['DateAdded'], errors='coerce')
+    # Convertir a YearsSinceAdded, aqui los nulos regresan a NaN
+    df_with_features['YearsSinceAdded'] = round(((pd.Timestamp.now() - df_with_features['DateAdded']).dt.days / 365.25), 0)
+
+    # Se asignan a cero años los tickers que no pertenecen al Índice S&P 500
+    df_with_features['YearsSinceAdded'] = df_with_features['YearsSinceAdded'].fillna(0)
+
+    # Eliminar la columna original
+    df_with_features.drop('DateAdded', axis=1, inplace=True)
+
+
+    # Calcular métricas financieras y ratios de valuación:
+    df_with_features, crecimiento_cols = calcular_metricas(df_with_features)
+
+    # Calcular aceleraciones
+    df_with_features = calcular_acceleration(df_with_features, crecimiento_cols)
+
+    # Calcular retornos
+    # Se abre el fichero de precios del Índice del Mercado para calcular las covarianzas
     df_index = pd.read_parquet(f"{data_folder}/market_index.parquet")
-    df_with_features = calcular_retornos(df_with_metrics, df_index)
 
-    # Se aplica lag de 1 período a volumen para evitar Data Leakage
+    df_with_features = calcular_retornos(df_with_features, df_index)
+
+    # Aplicar lag1 a Volumen
     df_with_features['Volume_Lag1'] = df_with_features['Volume'].shift(1)
     df_with_features.drop('Volume', axis=1, inplace=True)
 
-    # Imputación final
-    # Medias moviles
-    df_imputed = imputar_numericas(df_with_features)
-   
+
+    # Calcular tamaños relativos: RelativeAssets y RelativeRevenue
+    df_with_features = calcular_relative_size(df_with_features)
+
+    print("Feature Engineering finalizado.")
+
+    # Tratamiento Final de Missings
+
+    #Se aplica imputación transversal para las columnas de crecimiento:
+    df_imputed = imputar_transversal(df_with_features, crecimiento_cols)
+
+    # Se aplica la imputación de medias móviles sobre las nuevas variables
+    df_imputed = imputar_numericas(df_imputed)
+
     # Se aplican los fills sobre los missings que queden
     df_imputed = aplicar_fill(df_imputed,None)
 
-    print("Imputación finalizada.")
+    print("Tratamiento de Missings finalizado.")
+
     # Transformaciones
-    # Se calculan tamaños relativos: RelativeAssets y RelativeRevenue
-    df_transformed = calcular_relative_size(df_imputed)
+
+    # Columnas financieras y volumen expresadas en millones
+    df_transformed = columnas_en_millones(df_imputed)
 
     # Convertir Sector y Industry a tipo category
     df_transformed['Sector'] = df_transformed['Sector'].astype('category')
@@ -668,6 +738,10 @@ def main():
         df_transformed[f'{columna}_Log1p'] = np.log1p(df_transformed[columna])
         df_transformed.drop(columna, axis=1, inplace=True)
     
+    print("Transformaciones finalizadas.")
+
+    # Gestión de Outliers
+
     # Definir columnas que saltean la "winsorización"
     cols_fin_clean = obtener_cols_financieras(incluirTTM=True)
 
@@ -683,11 +757,11 @@ def main():
         'Ticker'     
         ]
 
+
     # Separar el dataset
     df_passthrough = df_transformed[columnas_intactas].copy()
     df_transformed_features = df_transformed.drop(columns=columnas_intactas)
 
-    # Gestión de outliers
     df_cont_transformed = df_transformed_features.select_dtypes(include="number")
     df_winsor = df_cont_transformed.apply(lambda x: gestiona_outliers(x, clas='winsor'))
 

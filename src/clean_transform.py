@@ -1,13 +1,15 @@
 """
 src/clean_transform.py
 Módulo auxiliar de la fase de Transformación de Datos.
-Trata las anomalías detectadas en el dataset raw.
+Trata las errores detectados en el dataset raw.
 """
 import pandas as pd
 import numpy as np
 
-def limpiar_data(df:pd.DataFrame)->pd.DataFrame:
-
+def corregir_anomalias(df:pd.DataFrame)->pd.DataFrame:
+    """
+    Replica las correcciones analizadas en el notebook para efectuarlas cuando se ejecuta extract.py
+    """
     # Caso 1 - Error de importes en el Galance General: están multiplicados por 1.000
     clean_df = df.copy()
     condicion_error_balance = (clean_df['Ticker'] == 'IIIN') & (clean_df['Date'] == '2021-12-01')
