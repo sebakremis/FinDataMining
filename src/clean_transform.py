@@ -6,16 +6,18 @@ Trata las errores detectados en el dataset raw.
 import pandas as pd
 import numpy as np
 
+
 def corregir_anomalias(df:pd.DataFrame)->pd.DataFrame:
     """
-    Replica las correcciones analizadas en el notebook para efectuarlas cuando se ejecuta extract.py
-    """
-    # Caso 1 - Error de importes en el Galance General: están multiplicados por 1.000
+    Efectua las correcciones de los casos analizados en el notebook de transformación.
+    """   
     clean_df = df.copy()
-    condicion_error_balance = (clean_df['Ticker'] == 'IIIN') & (clean_df['Date'] == '2021-12-01')
+
+    # Caso 1 - Error de importes en el Galance General
+    condicion_1 = (clean_df['Ticker'] == 'IIIN') & (clean_df['Date'] == '2021-12-01')
 
     # Columnas del balance que tienen el error
-    columnas_error_balance = [
+    columnas_1 = [
         'CashAndCashEquivalents', 
         'TotalAssets', 
         'StockholdersEquity', 
@@ -24,24 +26,31 @@ def corregir_anomalias(df:pd.DataFrame)->pd.DataFrame:
     ]
 
     # Se dividen por 1000
-    clean_df.loc[condicion_error_balance, columnas_error_balance] /= 1000
+    clean_df.loc[condicion_1, columnas_1] /= 1000
 
-    # Anomalías de signo
-    # Caso 2: Asignar a NaN TotalRevenue negativo
-    condicion_revenue_negativo = clean_df['TotalRevenue'] < 0
-    clean_df['TotalRevenue'] = np.where(condicion_revenue_negativo, np.nan, clean_df['TotalRevenue'])
+    # Caso 2:  TotalRevenue negativo
+    condicion_2 = clean_df['TotalRevenue'] < 0
 
-    # Caso 3: Eliminar registros con deuda negativa
-    condicion_deuda_negativa = (clean_df['CurrentDebt'] < 0) | (clean_df['LongTermDebt'] < 0)
-    clean_df = clean_df[~condicion_deuda_negativa].reset_index(drop=True)
+    # Se asignan a NaN
+    clean_df['TotalRevenue'] = np.where(condicion_2, np.nan, clean_df['TotalRevenue']) 
 
-    # Caso 4: Reemplazar por cero caso con amortización negativa de yfinance
-    condicion_depre_negativa_yfinance = (df['DepreciationAndAmortization'] < 0) & (df['FinancialsSource']=='yfinance')
-    df.loc[condicion_depre_negativa_yfinance,'DepreciationAndAmortization'] = 0
+    # Caso 3:  Deuda negativa
+    condicion_3 = (clean_df['CurrentDebt'] < 0) | (clean_df['LongTermDebt'] < 0)
 
-    # Caso 5: Convertir a positivos los negativos que vienen de simFin
-    condicion_depre_negativa_simfin = (df['DepreciationAndAmortization'] < 0) & (df['FinancialsSource']=='simFin')
-    df.loc[condicion_depre_negativa_simfin, 'DepreciationAndAmortization'] = df.loc[condicion_depre_negativa_simfin, 'DepreciationAndAmortization'].abs()
+    # Se eliminan los registros
+    clean_df = clean_df[~condicion_3].reset_index(drop=True)
+
+    # Caso 4:  Depreciación y Amortización negativa de yfinance
+    condicion_4 = (df['DepreciationAndAmortization'] < 0) & (df['FinancialsSource']=='yfinance')
+
+    # Se reemplazan por cero
+    df.loc[condicion_4,'DepreciationAndAmortization'] = 0
+
+    # Caso 5: Depreciación y Amortización negativa de simFin
+    condicion_5 = (df['DepreciationAndAmortization'] < 0) & (df['FinancialsSource']=='simFin')
+
+    # Se convierten a positivos
+    df.loc[condicion_5, 'DepreciationAndAmortization'] = df.loc[condicion_5, 'DepreciationAndAmortization'].abs()
 
     return clean_df
 

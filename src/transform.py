@@ -237,6 +237,23 @@ def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
     
     return df_ttm
 
+
+def crear_years_since_added(df:pd.DataFrame)->pd.DataFrame:
+    #  Pasar DateAdded a formato datetime, los NaN se vuelven NaT (not a time)
+    df['DateAdded'] = pd.to_datetime(df['DateAdded'], errors='coerce')
+
+    # Convertir a YearsSinceAdded, aqui los nulos regresan a NaN
+    df['YearsSinceAdded'] = round(((pd.Timestamp.now() - df['DateAdded']).dt.days / 365.25), 0)
+
+    # Se asignan a cero años los tickers que no pertenecen al Índice S&P 500
+    df['YearsSinceAdded'] = df['YearsSinceAdded'].fillna(0)
+
+    # Eliminar la columna original
+    df.drop('DateAdded', axis=1, inplace=True)
+
+    return df
+
+
 def obtener_cols_financieras(incluirTTM:bool=True)->list:
     if incluirTTM:
         cadena = '_TTM'
@@ -669,10 +686,7 @@ def main():
     df_with_features = transformar_flujos_a_ttm(df_fin_imputed)
 
     # Crear feature YearsSinceAdded
-    #  Pasar DateAdded a formato datetime, los NaN se vuelven NaT (not a time)
-    df_with_features['DateAdded'] = pd.to_datetime(df_with_features['DateAdded'], errors='coerce')
-    # Convertir a YearsSinceAdded, aqui los nulos regresan a NaN
-    df_with_features['YearsSinceAdded'] = round(((pd.Timestamp.now() - df_with_features['DateAdded']).dt.days / 365.25), 0)
+    df_with_features = crear_years_since_added(df_with_features)
 
     # Se asignan a cero años los tickers que no pertenecen al Índice S&P 500
     df_with_features['YearsSinceAdded'] = df_with_features['YearsSinceAdded'].fillna(0)
