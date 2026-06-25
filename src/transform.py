@@ -13,6 +13,9 @@ import plotly.express as px
 from src.clean_transform import corregir_anomalias
 from src.config import cols_balance, cols_cashflow, cols_resultados, data_folder
 
+# --- Funciones de Limpieza de Datos ---
+
+
 def limpiar_cadenas(texto):
     if not isinstance(texto, str): # Por si hay valores nulos (NaN)
         return texto
@@ -30,31 +33,15 @@ def limpiar_cadenas(texto):
 
 
 def columnas_en_millones(df:pd.DataFrame)->pd.DataFrame:
-    cols = obtener_cols_financieras(incluirTTM=True)
-    cols.append('Volume_Lag1') # se convierte también el volumen
+    cols = obtener_cols_financieras(incluirTTM=False)
+    cols.append('Volume') # se convierte también el volumen
     cols.append('CashAndCashEquivalents') # no está en la lista de columnas de yfinance
     set_cols = set(cols)
     df[list(set_cols)] = df[list(set_cols)] / 10**6
     return df
 
 
-def validar_escalas(df:pd.DataFrame)->pd.DataFrame:
-    df = validar_escalas(df)
-    mask_error_escala = df['TotalAssets'] > (df['TotalRevenue'] * 100)
-
-    # Dividir por 1000 las columnas afectadas solo en los registros defectuosos
-    columnas_balance = [
-        'CashAndCashEquivalents', 
-        'TotalAssets', 
-        'StockholdersEquity', 
-        'CurrentAssets', 
-        'CurrentLiabilities'
-    ]
-
-    df.loc[mask_error_escala, columnas_balance] /= 1000
-
-    return df
-
+# --- Tratamiento de Missings
 
 def mostrar_missings(df:pd.DataFrame)->pd.Series:
     """
@@ -189,6 +176,59 @@ def aplicar_fill(df:pd.DataFrame,limite)->pd.DataFrame:
     return df
 
 
+def imputar_transversal(df: pd.DataFrame, cols: list, metric: str = 'median') -> pd.DataFrame:
+    """
+    Imputa valores nulos en variables usando la métrica del sector en la misma fecha exacta. 
+    Si el sector entero no tiene datos, usa la métrica de todo el mercado.
+    
+    Args:
+        df: DataFrame original con las columnas 'Date' y 'Sector'.
+        cols: Lista de strings con los nombres de las columnas a imputar.
+        metric: 'mean' (promedio) o 'median' (mediana).
+    """
+    # Trabajar sobre una copia
+    df_imputado = df.copy()
+    
+    # Verificar que las columnas necesarias para agrupar existan
+    if 'Sector' not in df_imputado.columns or 'Date' not in df_imputado.columns or 'Ticker' not in df_imputado.columns:
+        raise KeyError("El DataFrame debe contener las columnas 'Date', 'Sector' y 'Ticker'.")
+
+    for col in cols:
+        if col not in df_imputado.columns:
+            continue
+            
+        # Imputación Primaria: Agrupar por Fecha y Sector
+        metrica_sectorial = df_imputado.groupby(['Date', 'Sector'], observed=True)[col].transform(metric)
+        df_imputado[col] = df_imputado[col].fillna(metrica_sectorial)
+        
+        # Imputación Secundaria (Fallback): Por si un sector entero es NaN ese mes
+        if df_imputado[col].isnull().any():
+            metrica_mercado = df_imputado.groupby('Date')[col].transform(metric)
+            df_imputado[col] = df_imputado[col].fillna(metrica_mercado)
+            
+        # Imputación Terciaria: Si todo el mercado es NaN, llenar con bfill
+        if df_imputado[col].isnull().any():
+            df_imputado[col] = df_imputado.groupby('Ticker')[col].bfill()
+
+    return df_imputado
+
+
+# --- Funciones de Feature Engineering ---
+
+def obtener_cols_financieras(incluirTTM:bool=True)->list:
+    if incluirTTM:
+        cadena = '_TTM'
+    else:
+        cadena = ''
+    
+    cols_cashflow_ttm = [col + cadena for col in cols_cashflow]
+    cols_resultados_ttm = [col + cadena for col in cols_resultados]
+    cols_financieras_raw = cols_balance + cols_cashflow_ttm + cols_resultados_ttm
+    cols_financieras = [col.replace(' ', '') for col in cols_financieras_raw]
+
+    return cols_financieras
+
+
 def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
     """
     Transforma variables financieras de flujo a TTM (Trailing Twelve Months) 
@@ -254,22 +294,6 @@ def crear_years_since_added(df:pd.DataFrame)->pd.DataFrame:
     return df
 
 
-def obtener_cols_financieras(incluirTTM:bool=True)->list:
-    if incluirTTM:
-        cadena = '_TTM'
-    else:
-        cadena = ''
-    
-    cols_cashflow_ttm = [col + cadena for col in cols_cashflow]
-    cols_resultados_ttm = [col + cadena for col in cols_resultados]
-    cols_financieras_raw = cols_balance + cols_cashflow_ttm + cols_resultados_ttm
-    cols_financieras = [col.replace(' ', '') for col in cols_financieras_raw]
-
-    return cols_financieras
-
-
-# Cálculos de métricas financieras
-
 def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """
     Recibe el DataFrame limpio de precios trimestrales y datos fundamentales alineados, 
@@ -309,15 +333,12 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     # Calcular Capitalización Bursátil expresada en millones (se convirtió previamente BasicAverageShare a millones)
     df_metrics['MarketCap'] = (df_metrics['Open'] * df_metrics['BasicAverageShares_TTM'])
 
-
     # Preparar deuda y efectivo para el EnterpriseValue = MarketCap + Deuda Total - Efectivo
     deuda_total = df_metrics['TotalDebt'].fillna(
         df_metrics['CurrentDebt'].fillna(0) + df_metrics['LongTermDebt'].fillna(0)
     )
     efectivo = df_metrics['CashAndCashEquivalents'].fillna(0)
     df_metrics['EnterpriseValue'] = df_metrics['MarketCap'] + deuda_total - efectivo
-
-    
 
     # Ratios de valuación
     df_metrics['TrailingPE'] = df_metrics['MarketCap'] / df_metrics['NetIncome_TTM']
@@ -403,8 +424,6 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     mask_ebitda_invalido = df_metrics['EBITDA_TTM'] <= 0
     df_metrics.loc[mask_ebitda_invalido,'EnterpriseToEbitda'] = np.nan
 
-
-
     # Limpieza final: Redondear columnas
     cols_a_redondear = [
         'TrailingPE', 'PriceToBook', 'EnterpriseToEbitda', 'OperatingMargins', 
@@ -429,13 +448,6 @@ def calcular_acceleration(df:pd.DataFrame, cols:list, reemplazar:bool= False)-> 
             print(f"Error procesando columna {col}: {e}")
             continue
 
-    return df
-
-def calcular_lag(df:pd.DataFrame, cols:list,q:int=4)->pd.DataFrame:
-    for col in cols:
-        df[col+f'_Lag{q}'] = df[col].shift(4)
-
-    df.drop(columns=cols, inplace=True)
     return df
 
 
@@ -489,41 +501,12 @@ def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4
     return df_final
 
 
-def imputar_transversal(df: pd.DataFrame, cols: list, metric: str = 'median') -> pd.DataFrame:
-    """
-    Imputa valores nulos en variables usando la métrica del sector en la misma fecha exacta. 
-    Si el sector entero no tiene datos, usa la métrica de todo el mercado.
-    
-    Args:
-        df: DataFrame original con las columnas 'Date' y 'Sector'.
-        cols: Lista de strings con los nombres de las columnas a imputar.
-        metric: 'mean' (promedio) o 'median' (mediana). Se recomienda 'median' en finanzas.
-    """
-    # Trabajar sobre una copia
-    df_imputado = df.copy()
-    
-    # Verificar que las columnas necesarias para agrupar existan
-    if 'Sector' not in df_imputado.columns or 'Date' not in df_imputado.columns:
-        raise KeyError("El DataFrame debe contener las columnas 'Date' y 'Sector'.")
-
+def calcular_lag(df:pd.DataFrame, cols:list,q:int=1)->pd.DataFrame:
     for col in cols:
-        if col not in df_imputado.columns:
-            continue
-            
-        # Imputación Primaria: Agrupar por Fecha y Sector
-        metrica_sectorial = df_imputado.groupby(['Date', 'Sector'])[col].transform(metric)
-        df_imputado[col] = df_imputado[col].fillna(metrica_sectorial)
-        
-        # Imputación Secundaria (Fallback): Por si un sector entero es NaN ese mes
-        if df_imputado[col].isnull().any():
-            metrica_mercado = df_imputado.groupby('Date')[col].transform(metric)
-            df_imputado[col] = df_imputado[col].fillna(metrica_mercado)
-            
-        # Imputación Terciaria: Si todo el mercado es NaN, llenar con bfill
-        if df_imputado[col].isnull().any():
-            df_imputado[col] = df_imputado.groupby('Ticker')[col].bfill()
+        df[col+f'_Lag{q}'] = df[col].shift(4)
 
-    return df_imputado
+    df.drop(columns=cols, inplace=True)
+    return df
 
 
 def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
@@ -544,6 +527,84 @@ def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
    
     return df
 
+
+# --- Funciones de Análisis Exploratorio de Datos ---
+
+def histogram_boxplot(data, xlabel = None, title = None, font_scale=2, figsize=(9,8), bins = None):
+    """ Boxplot and histogram combined
+    data: 1-d data array
+    xlabel: xlabel 
+    title: title
+    font_scale: the scale of the font (default 2)
+    figsize: size of fig (default (9,8))
+    bins: number of bins (default None / auto)
+
+    example use: histogram_boxplot(np.random.rand(100), bins = 20, title="Fancy plot")
+    """
+    # Definir tamaño letra
+    sns.set(font_scale=font_scale)
+    # Crear ventana para los subgráficos
+    f2, (ax_box2, ax_hist2) = plt.subplots(2, sharex=True, gridspec_kw={"height_ratios": (.15, .85)}, figsize=figsize)
+    # Crear boxplot
+    sns.boxplot(x=data, ax=ax_box2)
+    # Crear histograma
+    sns.histplot(x=data, ax=ax_hist2, bins=bins) if bins else sns.histplot(x=data, ax=ax_hist2)
+    # Pintar una línea con la media
+    ax_hist2.axvline(np.mean(data),color='g',linestyle='-')
+    # Pintar una línea con la mediana
+    ax_hist2.axvline(np.median(data),color='y',linestyle='--')
+    # Asignar título y nombre de eje si tal
+    if xlabel: ax_hist2.set(xlabel=xlabel)
+    if title: ax_box2.set(title=title, xlabel="")
+    # Mostrar gráfico
+    plt.show()
+
+
+def cat_plot(col):
+     """
+     Gráfico de barras para variables categóricas.
+     """
+     if col.dtypes == 'category':
+        fig = px.bar(col.value_counts())
+        #fig = sns.countplot(x=col)
+        return(fig)
+
+
+def plot(col):
+     """
+     Función general para aplicar al archivo por columnas, detectando el tipo de variable y aplicando el gráfico adecuado.
+     """
+     if col.dtypes != 'category':
+        print('Cont')
+        histogram_boxplot(col, xlabel = col.name, title = 'Distibución continua')
+     else:
+        print('Cat')
+        cat_plot(col).show()
+
+
+# --- Funciones de Transformación
+
+def transformar_log(df: pd.DataFrame, cols: list, calculo_1p: bool = False) -> pd.DataFrame:
+    # Creamos una copia para no alterar el DataFrame original accidentalmente
+    df_out = df.copy()
+    
+    # Se define la función y el sufijo
+    if calculo_1p:
+        funcion_log = np.log1p
+        sufijo = '_Log1p'
+    else:
+        funcion_log = np.log
+        sufijo = '_Log'
+        
+    # Se aplica la función y elimina la columna original
+    for col in cols:
+        df_out[f'{col}{sufijo}'] = funcion_log(df_out[col])
+        df_out.drop(col, axis=1, inplace=True)
+        
+    return df_out
+
+
+# --- Tratamiento de Outliers ---
 
 def gestiona_outliers(col,clas = 'check'):
      """
@@ -586,62 +647,11 @@ def winsorize_with_pandas(s, limits):
     return s.clip(lower=s.quantile(limits[0], interpolation='lower'), 
                   upper=s.quantile(1-limits[1], interpolation='higher'))
 
-# Gráficos
 
-def histogram_boxplot(data, xlabel = None, title = None, font_scale=2, figsize=(9,8), bins = None):
-    """ Boxplot and histogram combined
-    data: 1-d data array
-    xlabel: xlabel 
-    title: title
-    font_scale: the scale of the font (default 2)
-    figsize: size of fig (default (9,8))
-    bins: number of bins (default None / auto)
+# --- Bloque principal ---
 
-    example use: histogram_boxplot(np.random.rand(100), bins = 20, title="Fancy plot")
-    """
-    # Definir tamaño letra
-    sns.set(font_scale=font_scale)
-    # Crear ventana para los subgráficos
-    f2, (ax_box2, ax_hist2) = plt.subplots(2, sharex=True, gridspec_kw={"height_ratios": (.15, .85)}, figsize=figsize)
-    # Crear boxplot
-    sns.boxplot(x=data, ax=ax_box2)
-    # Crear histograma
-    sns.histplot(x=data, ax=ax_hist2, bins=bins) if bins else sns.histplot(x=data, ax=ax_hist2)
-    # Pintar una línea con la media
-    ax_hist2.axvline(np.mean(data),color='g',linestyle='-')
-    # Pintar una línea con la mediana
-    ax_hist2.axvline(np.median(data),color='y',linestyle='--')
-    # Asignar título y nombre de eje si tal
-    if xlabel: ax_hist2.set(xlabel=xlabel)
-    if title: ax_box2.set(title=title, xlabel="")
-    # Mostrar gráfico
-    plt.show()
-    
-   
-def cat_plot(col):
-     """
-     Gráfico de barras para variables categóricas.
-     """
-     if col.dtypes == 'category':
-        fig = px.bar(col.value_counts())
-        #fig = sns.countplot(x=col)
-        return(fig)
-
-
-def plot(col):
-     """
-     Función general para aplicar al archivo por columnas, detectando el tipo de variable y aplicando el gráfico adecuado.
-     """
-     if col.dtypes != 'category':
-        print('Cont')
-        histogram_boxplot(col, xlabel = col.name, title = 'Distibución continua')
-     else:
-        print('Cat')
-        cat_plot(col).show()
-
-
-# Bloque principal (Se replica el flujo del Notebook Transformacion)
-# Se ejecuta desde la raiz: python -m src.transform
+# Se replica el flujo del Notebook 02_Transformacion
+# Ejecutar desde la raiz: python -m src.transform
 
 def main():
     # Abrir archivo raw_data
@@ -656,17 +666,24 @@ def main():
     df['Industry'] = df['Industry'].apply(limpiar_cadenas)
     df['Sector'] = df['Sector'].apply(limpiar_cadenas)
 
+    # Convertir Sector y Industry a tipo category
+    df['Sector'] = df['Sector'].astype('category')
+    df['Industry'] = df['Industry'].astype('category')
+
+    # Columnas financieras y volumen expresadas en millones
+    df = columnas_en_millones(df)
+
     # Corrección de anomalías
     df_clean = corregir_anomalias(df)
 
-    print("Limpieza de errores finalizada.")
+    print("Limpieza de datos finalizada.")
 
     # Tratamiento Inicial de Missings
 
     # Se imputa el missing en Industry y Sector
     condicion = df_clean['Ticker'] == 'MKSI'
     df_clean.loc[condicion, 'Sector'] = 'Technology'
-    df_clean.loc[condicion, 'Industry'] = 'Scientific & Technical Instruments'
+    df_clean.loc[condicion, 'Industry'] = 'Scientific And Technical Instruments'
 
     # imputar equivalencias financieras
     df_fin_imputed = imputar_equivalencias_financieras(df_clean)
@@ -688,13 +705,6 @@ def main():
     # Crear feature YearsSinceAdded
     df_with_features = crear_years_since_added(df_with_features)
 
-    # Se asignan a cero años los tickers que no pertenecen al Índice S&P 500
-    df_with_features['YearsSinceAdded'] = df_with_features['YearsSinceAdded'].fillna(0)
-
-    # Eliminar la columna original
-    df_with_features.drop('DateAdded', axis=1, inplace=True)
-
-
     # Calcular métricas financieras y ratios de valuación:
     df_with_features, crecimiento_cols = calcular_metricas(df_with_features)
 
@@ -707,10 +717,9 @@ def main():
 
     df_with_features = calcular_retornos(df_with_features, df_index)
 
-    # Aplicar lag1 a Volumen
-    df_with_features['Volume_Lag1'] = df_with_features['Volume'].shift(1)
-    df_with_features.drop('Volume', axis=1, inplace=True)
-
+    # Aplicar lag de un trimestre a Volume
+    columnas_lag1 = ['Volume']
+    df_with_features = calcular_lag(df_with_features, columnas_lag1, q=1)
 
     # Calcular tamaños relativos: RelativeAssets y RelativeRevenue
     df_with_features = calcular_relative_size(df_with_features)
@@ -731,16 +740,8 @@ def main():
     print("Tratamiento de Missings finalizado.")
 
     # Transformaciones
-
-    # Columnas financieras y volumen expresadas en millones
-    df_transformed = columnas_en_millones(df_imputed)
-
-    # Convertir Sector y Industry a tipo category
-    df_transformed['Sector'] = df_transformed['Sector'].astype('category')
-    df_transformed['Industry'] = df_transformed['Industry'].astype('category')
-
+   
     # Transformaciones logarítmicas
-
     columnas_a_transformar = [ 
         'Volume_Lag1',
         'CapExToRevenue',
@@ -749,10 +750,12 @@ def main():
         'MarketCap',
         'EnterpriseValue'
         ]
-    for columna in columnas_a_transformar:
-        df_transformed[columna] = df_transformed[columna].fillna(0)
-        df_transformed[f'{columna}_Log1p'] = np.log1p(df_transformed[columna])
-        df_transformed.drop(columna, axis=1, inplace=True)
+
+    df_transformed = transformar_log(
+        df_imputed, 
+        columnas_a_transformar, 
+        calculo_1p=True
+        )
     
     print("Transformaciones finalizadas.")
 
@@ -772,7 +775,6 @@ def main():
         'Date', 
         'Ticker'     
         ]
-
 
     # Separar el dataset
     df_passthrough = df_transformed[columnas_intactas].copy()
