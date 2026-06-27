@@ -84,14 +84,24 @@ def procesar_resultados_prediccion(y_test, y_pred, tickers):
     
     return resultados_agrupados
 
-def visualizar_resultados_predicciones(resultados_agrupados:pd.DataFrame):
+def visualizar_resultados_predicciones(resultados_agrupados: pd.DataFrame):
     fig = px.scatter(
         resultados_agrupados, 
         x='Observed', 
         y='Predicted', 
         color='Cluster',
+        # --- Mapeo de colores
+        color_discrete_map={
+            'PositiveBias': 'blue', 
+            'NegativeBias': 'red'
+        },
+
         hover_name=resultados_agrupados.index, 
-        labels={'Observed':'Valores Reales', 'Predicted':'Predicciones', 'Cluster':'Sesgo del Modelo'},
+        labels={
+            'Observed': 'Valores Reales', 
+            'Predicted': 'Predicciones', 
+            'Cluster': 'Sesgo del Modelo'
+        },
         title='Predicciones vs Reales (Agrupado por Ticker)'
     )
 
@@ -99,13 +109,14 @@ def visualizar_resultados_predicciones(resultados_agrupados:pd.DataFrame):
     min_val = resultados_agrupados['Observed'].min()
     max_val = resultados_agrupados['Observed'].max()
     fig.add_shape(type='line', x0=min_val, y0=min_val, x1=max_val, y1=max_val,
-                line=dict(color='black', dash='dash', width=2))
+                  line=dict(color='black', dash='dash', width=2))
+    
     fig.show()
 
     # Estadísticas por cluster a nivel Ticker
-    over_mask = resultados_agrupados['Cluster'] == 'PositiveBias'
-    under_mask = resultados_agrupados['Cluster'] == 'NegativeBias'
+    positive_mask = resultados_agrupados['Cluster'] == 'PositiveBias'
+    negative_mask = resultados_agrupados['Cluster'] == 'NegativeBias'
 
     print("\nEstadísticas por cluster (a nivel de Ticker):")
-    print(f"Overprediction: {over_mask.sum()} tickers, residuo medio global: {resultados_agrupados.loc[over_mask, 'Residuals'].mean():.4f}")
-    print(f"Underprediction: {under_mask.sum()} tickers, residuo medio global: {resultados_agrupados.loc[under_mask, 'Residuals'].mean():.4f}")
+    print(f"Sesgos positivos: {positive_mask.sum()} tickers, residuo medio global: {resultados_agrupados.loc[positive_mask, 'Residuals'].mean():.4f}")
+    print(f"Sesgos negativos: {negative_mask.sum()} tickers, residuo medio global: {resultados_agrupados.loc[negative_mask, 'Residuals'].mean():.4f}")
