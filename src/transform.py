@@ -294,7 +294,7 @@ def crear_years_since_added(df:pd.DataFrame)->pd.DataFrame:
     return df
 
 
-def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     """
     Recibe el DataFrame limpio de precios trimestrales y datos fundamentales alineados, 
     y calcula métricas financieras históricas.
@@ -355,43 +355,6 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     df_metrics['DebtToEquity'] = deuda_total / df_metrics['StockholdersEquity']
     df_metrics['CurrentRatio'] = df_metrics['CurrentAssets'] / df_metrics['CurrentLiabilities']
        
-    # Ratios de crecimiento
-    '''
-    - Crecimiento interanual (Year-over-Year, YoY) - Ventana de 4 trimestres y Trimestral (QoQ)
-    - Se aplica .abs() en el denominador para corregir matemáticamente la dirección del 
-    crecimiento si el período anterior era negativo.
-    - No me decido si utilizar una función wrapper, me parece más simple dejarlo así.
-    '''
-    crecimiento_cols = []
-
-    # Revenue Growth
-    prev_rev_4 = df_metrics.groupby('Ticker')['TotalRevenue_TTM'].shift(4)
-    df_metrics['Revenue_YoY'] = (df_metrics['TotalRevenue_TTM'] - prev_rev_4) / prev_rev_4.abs()
-    prev_rev_1 = df_metrics.groupby('Ticker')['TotalRevenue_TTM'].shift(1)
-    df_metrics['Revenue_QoQ'] = (df_metrics['TotalRevenue_TTM'] - prev_rev_1) / prev_rev_1.abs()
-    crecimiento_cols.extend(['Revenue_YoY', 'Revenue_QoQ'])
-    
-    # EBITDA Growth
-    prev_ebitda_4 = df_metrics.groupby('Ticker')['EBITDA_TTM'].shift(4)
-    df_metrics['Ebitda_YoY'] = (df_metrics['EBITDA_TTM'] - prev_ebitda_4) / prev_ebitda_4.abs()
-    prev_ebitda_1 = df_metrics.groupby('Ticker')['EBITDA_TTM'].shift(1)
-    df_metrics['Ebitda_QoQ'] = (df_metrics['EBITDA_TTM'] - prev_ebitda_1) / prev_ebitda_1.abs()
-    crecimiento_cols.extend(['Ebitda_YoY', 'Ebitda_QoQ'])
-    
-    # Free Cash Flow Growth
-    prev_FCF_4 = df_metrics.groupby('Ticker')['FreeCashFlow_TTM'].shift(4)
-    df_metrics['Fcf_YoY'] = (df_metrics['FreeCashFlow_TTM'] - prev_FCF_4) / prev_FCF_4.abs()
-    prev_FCF_1 = df_metrics.groupby('Ticker')['FreeCashFlow_TTM'].shift(1)
-    df_metrics['Fcf_QoQ'] = (df_metrics['FreeCashFlow_TTM'] - prev_FCF_1) / prev_FCF_1.abs()
-    crecimiento_cols.extend(['Fcf_YoY', 'Fcf_QoQ'])
-
-    # CapEx Growth
-    prev_Capex_4 = df_metrics.groupby('Ticker')['CapitalExpenditure_TTM'].shift(4)
-    df_metrics['CapEx_YoY'] = (df_metrics['CapitalExpenditure_TTM'] - prev_Capex_4) / prev_Capex_4.abs()
-    prev_Capex_1 = df_metrics.groupby('Ticker')['CapitalExpenditure_TTM'].shift(1)
-    df_metrics['CapEx_QoQ'] = (df_metrics['CapitalExpenditure_TTM'] - prev_Capex_1) / prev_Capex_1.abs()
-    crecimiento_cols.extend(['CapEx_YoY', 'CapEx_QoQ'])
-
     # Otras métricas
     # Apalancamiento 
     df_metrics['NetDebtToEbitda'] = (deuda_total - df_metrics['CashAndCashEquivalents']) / df_metrics['EBITDA_TTM']
@@ -405,10 +368,6 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     
     # Reemplazar por NaN todos los infinitos generados por divisiones por cero
     df_metrics.replace([np.inf, -np.inf], np.nan, inplace=True)
-
-    # Acotar si quedan resultados absurdos que puedan quedar de dividir por números pequeños
-    for col in crecimiento_cols:
-        df_metrics[col] = df_metrics[col].clip(lower=-10.0, upper=10.0) # Acota entre -1000% y +1000%
 
     # Forzar NaN en métricas dependientes del Patrimonio si este es negativo
     mask_patrimonio_invalido = df_metrics['StockholdersEquity'] <= 0
@@ -432,17 +391,47 @@ def calcular_metricas(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     
     df_metrics[cols_a_redondear] = df_metrics[cols_a_redondear].round(6) # 6 decimales
 
-    return df_metrics, crecimiento_cols
+    return df_metrics
 
 
-def calcular_acceleration(df:pd.DataFrame, cols:list, reemplazar:bool= False)-> pd.DataFrame:
+def convertir_volumen_a_adv(df:pd.DataFrame)->pd.DataFrame:
+    df['AverageDailyVolume'] = df['Volume'] / 63 # estimado de 63 días hábiles por trimestre
+    df.drop('Volume', axis=1, inplace=True)
+    return df
+
+
+def calcular_crecimientos(df:pd.DataFrame, crecimiento_cols:list[str])->pd.DataFrame:
+    """
+    - Calcula crecimiento interanual (Year-over-Year, YoY) - Ventana de 4 trimestres 
+    - Calcula crecimiento Trimestral (QoQ) - Ventana de 1 trimestre
+    - Se aplica .abs() en el denominador para corregir matemáticamente la dirección del 
+    crecimiento si el período anterior era negativo.
+    """
+    df_out = df.copy()
+    for col in crecimiento_cols:
+        prev_rev_4 = df_out.groupby('Ticker')[col].shift(4)
+        df_out[f'{col}_YoY'] = (df_out[col] - prev_rev_4) / prev_rev_4.abs()
+        prev_rev_1 = df_out.groupby('Ticker')[col].shift(1)
+        df_out[f'{col}_QoQ'] = (df_out[col] - prev_rev_1) / prev_rev_1.abs()
+
+        # Acotar si quedan resultados absurdos que puedan quedar de dividir por números pequeños
+        df_out[f'{col}_YoY'] = df_out[f'{col}_YoY'].clip(lower=-10.0, upper=10.0) # Acota entre -1000% y +1000%
+        df_out[f'{col}_QoQ'] = df_out[f'{col}_QoQ'].clip(lower=-10.0, upper=10.0)
+
+    # Reemplazar por NaN todos los infinitos generados por divisiones por cero
+    df_out.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+    return df_out
+
+
+def calcular_aceleraciones(df:pd.DataFrame, cols:list)-> pd.DataFrame:
     for col in cols:
         try:
             # Se extrae el nombre de la variable
-            feature_name = col.split('_')[0]
+            #feature_name = col.split('_')[0]
 
             # Calcular Acceleration: se define como la tasa de cambio a corto plazo menos la de largo.
-            df[f'{feature_name}_Acceleration'] = df[f'{feature_name}_QoQ'] - df[f'{feature_name}_YoY']        
+            df[col] = df[f'{col}_QoQ'] - df[f'{col}_YoY']        
 
         except Exception as e:
             print(f"Error procesando columna {col}: {e}")
@@ -492,9 +481,6 @@ def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4
     df_features = df_ret_long.merge(df_var_long, on=['Date', 'Ticker'])
     df_features = df_features.merge(df_cov_long, on=['Date', 'Ticker'])
     
-    # Redondear para mayor legibilidad
-    df_features = df_features.round(6)
-
     # Unir las features con el DataFrame original
     df_final = pd.merge(df, df_features, on=['Date', 'Ticker'], how='left')
     
