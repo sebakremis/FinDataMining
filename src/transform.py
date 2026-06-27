@@ -164,21 +164,10 @@ def imputar_numericas(df:pd.DataFrame)->pd.DataFrame:
     return df_resultado
 
 
-def aplicar_interpolacion(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Elimina TODOS los missings en las columnas numéricas por cada Ticker.
-    Conecta puntos intermedios linealmente y proyecta de forma plana (ffill/bfill) 
-    en los extremos, sin límite de registros.
-    """
-    cols = df.select_dtypes(include=np.number).columns
-    
-    # .transform() asegura que los índices se mantengan alineados con el df original
-    df[cols] = df.groupby('Ticker')[cols].transform(
-        lambda x: x.interpolate(
-            method='linear', 
-            limit_direction='both'  # 'both' asegura que rellene hacia adelante y hacia atrás en los extremos
-        )
-    )
+def aplicar_fill(df: pd.DataFrame, cols, limite:int=4) -> pd.DataFrame:
+
+    # Se copia el último valor conocido hacia adelante (Cero Leakage)
+    df[cols] = df.groupby('Ticker')[cols].ffill(limit=limite)
     
     return df
 
@@ -688,8 +677,11 @@ def main():
     df_fin_imputed = imputar_numericas(df_fin_imputed)
 
 
-    # Forward fill y Back fill
-    df_fin_imputed = aplicar_interpolacion(df_fin_imputed)
+    # Forward fill y dropna para missings restantes
+    cols_numericas = df_fin_imputed.select_dtypes(include="number").columns
+    df_fin_imputed = aplicar_fill(df_fin_imputed, cols= cols_numericas, limite=4)
+
+    df_fin_imputed = df_fin_imputed.dropna(subset=cols_numericas)
 
     print("Tratamiento Inicial de Missings finalizado.")
 
@@ -741,8 +733,11 @@ def main():
     # Se aplica la imputación de medias móviles sobre las nuevas variables
     df_imputed = imputar_numericas(df_imputed)
 
-    # Se aplican los fills sobre los missings que queden
-    df_imputed = aplicar_interpolacion(df_imputed)
+    # Se aplica forward fill y se remueven NaNs remanentes
+    cols_numericas = df_imputed.select_dtypes(include="number").columns
+    df_imputed = aplicar_fill(df_imputed, cols=cols_numericas, limite=4)
+
+    df_imputed = df_imputed.dropna(subset=cols_numericas)
 
     print("Tratamiento de Missings finalizado.")
 
