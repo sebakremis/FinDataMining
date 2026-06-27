@@ -164,15 +164,22 @@ def imputar_numericas(df:pd.DataFrame)->pd.DataFrame:
     return df_resultado
 
 
-def aplicar_fill(df:pd.DataFrame,limite)->pd.DataFrame:
+def aplicar_interpolacion(df: pd.DataFrame) -> pd.DataFrame:
     """
-    - Aplica Forward Fill y Back Fill sobre  las columnas numéricas
+    Elimina TODOS los missings en las columnas numéricas por cada Ticker.
+    Conecta puntos intermedios linealmente y proyecta de forma plana (ffill/bfill) 
+    en los extremos, sin límite de registros.
     """
     cols = df.select_dtypes(include=np.number).columns
-
-    df[cols] = df.groupby('Ticker')[cols].ffill(limit=limite)
-    df[cols] = df.groupby('Ticker')[cols].bfill(limit=limite)
-
+    
+    # .transform() asegura que los índices se mantengan alineados con el df original
+    df[cols] = df.groupby('Ticker')[cols].transform(
+        lambda x: x.interpolate(
+            method='linear', 
+            limit_direction='both'  # 'both' asegura que rellene hacia adelante y hacia atrás en los extremos
+        )
+    )
+    
     return df
 
 
@@ -641,13 +648,15 @@ def winsorize_with_pandas(s, limits):
 # Ejecutar desde la raiz: python -m src.transform
 
 def main():
+    # --- Preliminares ---
+
     # Abrir archivo raw_data
     df = pd.read_parquet(f"{data_folder}/raw_data.parquet")
 
     # Se asegura el ordenamiento por fecha
     df = df.sort_values(by='Date').reset_index(drop=True)
 
-    # Limpieza de datos
+    # --- Limpieza de datos ---
 
     # Limpiar cadenas de texto en Sector y Industry
     df['Industry'] = df['Industry'].apply(limpiar_cadenas)
@@ -665,7 +674,7 @@ def main():
 
     print("Limpieza de datos finalizada.")
 
-    # Tratamiento Inicial de Missings
+    # --- Tratamiento Inicial de Missings ---
 
     # Se imputa el missing en Industry y Sector
     condicion = df_clean['Ticker'] == 'MKSI'
@@ -680,11 +689,11 @@ def main():
 
 
     # Forward fill y Back fill
-    df_fin_imputed = aplicar_fill(df_fin_imputed, limite=None)
+    df_fin_imputed = aplicar_interpolacion(df_fin_imputed)
 
     print("Tratamiento Inicial de Missings finalizado.")
 
-    # Feature Engineering
+    # --- Feature Engineering ---
 
     # Variables TTM
     df_with_features = transformar_flujos_a_ttm(df_fin_imputed)
@@ -693,27 +702,38 @@ def main():
     df_with_features = crear_years_since_added(df_with_features)
 
     # Calcular métricas financieras y ratios de valuación:
-    df_with_features, crecimiento_cols = calcular_metricas(df_with_features)
+    df_with_features = calcular_metricas(df_with_features)
 
-    # Calcular aceleraciones
-    df_with_features = calcular_acceleration(df_with_features, crecimiento_cols)
+    # Calcular AverageDailyVolume
+    df_with_features = convertir_volumen_a_adv(df_with_features)
+
+    # Aplicar lag de un trimestre a Volume
+    columnas_lag1 = ['AverageDailyVolume']
+    df_with_features = calcular_lag(df_with_features, columnas_lag1, q=1)
+
+    # Calcular crecimientos y aceleraciones
+    crecimiento_cols = [
+        'TotalRevenue_TTM',
+        'EBITDA_TTM',
+        'FreeCashFlow_TTM',
+        'CapitalExpenditure_TTM',
+        'AverageDailyVolume_Lag1'
+    ]
+    df_with_features = calcular_crecimientos(df_with_features, crecimiento_cols)
+    df_with_features = calcular_aceleraciones(df_with_features, crecimiento_cols)
 
     # Calcular retornos
     # Se abre el fichero de precios del Índice del Mercado para calcular las covarianzas
     df_index = pd.read_parquet(f"{data_folder}/market_index.parquet")
 
-    df_with_features = calcular_retornos(df_with_features, df_index)
-
-    # Aplicar lag de un trimestre a Volume
-    columnas_lag1 = ['Volume']
-    df_with_features = calcular_lag(df_with_features, columnas_lag1, q=1)
+    df_with_features = calcular_retornos(df_with_features, df_index)  
 
     # Calcular tamaños relativos: RelativeAssets y RelativeRevenue
     df_with_features = calcular_relative_size(df_with_features)
 
     print("Feature Engineering finalizado.")
 
-    # Tratamiento Final de Missings
+    # --- Tratamiento Final de Missings ---
 
     #Se aplica imputación transversal para las columnas de crecimiento:
     df_imputed = imputar_transversal(df_with_features, crecimiento_cols)
@@ -722,15 +742,14 @@ def main():
     df_imputed = imputar_numericas(df_imputed)
 
     # Se aplican los fills sobre los missings que queden
-    df_imputed = aplicar_fill(df_imputed,None)
+    df_imputed = aplicar_interpolacion(df_imputed)
 
     print("Tratamiento de Missings finalizado.")
 
-    # Transformaciones
+    # --- Transformaciones ---
    
     # Transformaciones logarítmicas
     columnas_a_transformar = [ 
-        'Volume_Lag1',
         'CapExToRevenue',
         'DebtToEquity',
         'QuarterlyVariance_Lag1',
@@ -746,7 +765,7 @@ def main():
     
     print("Transformaciones finalizadas.")
 
-    # Gestión de Outliers
+    # --- Tratamiento de Outliers ---
 
     # Definir columnas que saltean la "winsorización"
     cols_fin_clean = obtener_cols_financieras(incluirTTM=True)
@@ -771,7 +790,9 @@ def main():
     df_winsor = df_cont_transformed.apply(lambda x: gestiona_outliers(x, clas='winsor'))
 
     print("Gestión de outliers finalizada.")
-    # Concatenación final
+
+    # --- Concatenación final y almacenamiento ---
+
     df_non_numeric_transformed = df_transformed_features.select_dtypes(exclude='number')
     # Se unen variables contínuas transformadas y variables no numéricas
     df_combined = pd.concat([df_non_numeric_transformed, df_winsor], axis=1)
