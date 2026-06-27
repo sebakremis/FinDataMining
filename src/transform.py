@@ -425,19 +425,20 @@ def calcular_crecimientos(df:pd.DataFrame, crecimiento_cols:list[str])->pd.DataF
 
 
 def calcular_aceleraciones(df:pd.DataFrame, cols:list)-> pd.DataFrame:
+    df_out = df.copy()
     for col in cols:
         try:
             # Se extrae el nombre de la variable
             #feature_name = col.split('_')[0]
 
             # Calcular Acceleration: se define como la tasa de cambio a corto plazo menos la de largo.
-            df[col] = df[f'{col}_QoQ'] - df[f'{col}_YoY']        
+            df_out[f'{col}_Acceleration'] = df[f'{col}_QoQ'] - df[f'{col}_YoY']        
 
         except Exception as e:
             print(f"Error procesando columna {col}: {e}")
             continue
 
-    return df
+    return df_out
 
 
 def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4, min_periodos: int = 2) -> pd.DataFrame:
