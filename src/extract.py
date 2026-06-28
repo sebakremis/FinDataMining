@@ -302,7 +302,7 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
                 tickers_sin_datos.append(ticker)
                 continue
 
-            # Se limitan a las primeras 4 columnas 
+            # Se limitan a las primeras 4 columnas (yfinance devuelve 5, la última vacía)
             fin = fin.iloc[:, :4]
 
             # Transponer y filtrar Estado de Resultados
@@ -311,13 +311,20 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
             # Validación del Balance General (si existe)
             if bal is not None and not bal.empty:
                 bal = bal.iloc[:, :4] 
+                
+                # Se renombran las filas para variables con nombres largos (antes de transponer)
+                bal = bal.rename(index={
+                    'Total Non Current Liabilities Net Minority Interest': 'Total Noncurrent Liabilities',
+                    'Total Liabilities Net Minority Interest': 'Total Liabilities'
+                })
+                
                 df_bal = bal.T.reindex(columns=cols_balance)
+                
                 df_temp = df_fin.join(df_bal, how='left')
             else:
                 df_temp = df_fin.copy() 
-                for col in cols_balance:
-                    df_temp[col] = float('nan') 
-                df_temp[cols_balance] = df_temp[cols_balance].astype(float)  
+                # Pandas asigna el float('nan') a toda la lista de columnas de una sola vez
+                df_temp[cols_balance] = float('nan')  
 
             # Validación del Cash Flow (si existe)
             if cf is not None and not cf.empty:
@@ -325,9 +332,7 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
                 df_cf = cf.T.reindex(columns=cols_cashflow)
                 df_temp = df_temp.join(df_cf, how='left')
             else:
-                for col in cols_cashflow:
-                    df_temp[col] = float('nan')
-                df_temp[cols_cashflow] = df_temp[cols_cashflow].astype(float)        
+                df_temp[cols_cashflow] = float('nan')       
 
             # Limpieza del DataFrame temporal
             df_temp = df_temp.reset_index()

@@ -41,6 +41,8 @@ mapa_columnas = {
     'Total Assets': 'Total Assets',
     'Total Current Assets': 'Current Assets',
     'Total Current Liabilities': 'Current Liabilities',
+    'Total Noncurrent Liabilities': 'Total Noncurrent Liabilities',
+    'Total Liabilities': 'Total Liabilities',
 
     # --- FLUJO DE CAJA (Cash Flow) ---
     'Net Cash from Operating Activities': 'Operating Cash Flow',
@@ -57,7 +59,8 @@ cols_resultados = ['Total Revenue', 'Gross Profit', 'Operating Income', 'Net Inc
 
 cols_balance = ['Cash And Cash Equivalents', 'Current Debt', 'Long Term Debt', 
                 'Total Debt', 'Stockholders Equity', 'Total Assets', 'Current Assets', 
-                'Current Liabilities']
+                'Current Liabilities','Total Noncurrent Liabilities',
+                'Total Liabilities']
 
 cols_cashflow = ['Operating Cash Flow', 'Investing Cash Flow', 'Financing Cash Flow', 
                     'Free Cash Flow', 'Capital Expenditure', 'Depreciation And Amortization'] 

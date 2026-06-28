@@ -55,3 +55,14 @@ def corregir_anomalias(df:pd.DataFrame)->pd.DataFrame:
     return clean_df
 
 
+def imputar_info(df:pd.DataFrame)->pd.DataFrame:
+    """
+    Se imputan manualmente los missings encontrados en Industry y Sector
+    """
+    df_out = df.copy()
+    # Caso 1: MKSI
+    condicion_1 = df_out['Ticker'] == 'MKSI'
+    df_out.loc[condicion_1, 'Sector'] = 'Technology'
+    df_out.loc[condicion_1, 'Industry'] = 'Scientific And Technical Instruments'
+
+    return df_out
