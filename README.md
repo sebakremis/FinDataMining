@@ -14,6 +14,23 @@ Cuenta con tres fases:
 
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste bajas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
 
+---
+## 📊 Screenshots
+
+<div align="center">
+
+  <h3>Ejemplo de predicciones</h3>
+
+  <img src="docs/images/ejemplo_predicciones.png" alt="Ejemplo de predicciones" width="90%">
+
+  <br><br>
+  <h3>Ejemplo de explicabilidad con Shap</h3>
+
+  <img src="docs/images/ejemplo_shap_wdc.png" alt="Ejemplo de Shap" width="90%"> 
+
+</div>
+
+---
 ## 🗄️ Fuentes de Datos
 
 El pipeline de extracción obtiene datos históricos de precios de mercado y los balances corporativos disponibles de forma libre y gratuita, a través de las librerías: 
@@ -24,6 +41,7 @@ El pipeline de extracción obtiene datos históricos de precios de mercado y los
 
 Otra restricción de la cuenta básica de `simFin` es que no ofrece información histórica completa para todos los tickers. Se define entonces un universo de 550 empresas a partir de aquellas que, teniendo una cantidad mínima de información trimestral disponible, presentan un mayor nivel de ventas en promedio. De aquellos 550 tickers algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, contando el dataset actual con un total de 521 compañías.
 
+---
 ## 🚧 Estado del Proyecto
 
 `finDataMining` presenta actualmente dos formas de ejecución:
@@ -33,6 +51,7 @@ Otra restricción de la cuenta básica de `simFin` es que no ofrece información
 
 También esta previsto implementar características para actualizar y gestionar la base de datos.
 
+---
 ## 🗂️ Estructura Actual
 
 ```text
@@ -62,6 +81,7 @@ FINDATAMINING/
 └── requirements.txt                 # Dependencias necesarias
 ```
 
+---
 ## 📊 Dataset y Variables
 
 Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
@@ -69,6 +89,7 @@ Tras cruzar la información de los estados financieros con las series de precios
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
 * **Variable objetivo (Target):** La fase de modelado permite seleccionar y experimentar con distintas variables objetivo, tales como la Capitalización Bursátil o alguno de los ratios de valuación que se incluyen en el dataset.
 
+---
 ## 🚀 Requisitos e Instalación
 
 1. Clona este repositorio en tu máquina local:
@@ -84,6 +105,7 @@ Tras cruzar la información de los estados financieros con las series de precios
    pip install -r requirements.txt
    ```
 
+---
 ## 📜 Licencia
 Este repositorio se encuentra bajo una licencia de código abierto **MIT**. 
 Puedes usar, modificar y distribuir el código libremente para cualquier propósito.
