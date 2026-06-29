@@ -57,12 +57,18 @@ def corregir_anomalias(df:pd.DataFrame)->pd.DataFrame:
 
 def imputar_info(df:pd.DataFrame)->pd.DataFrame:
     """
-    Se imputan manualmente los missings encontrados en Industry y Sector
+    Se imputan manualmente los missings encontrados en Sector e Industry
     """
     df_out = df.copy()
-    # Caso 1: MKSI
-    condicion_1 = df_out['Ticker'] == 'MKSI'
-    df_out.loc[condicion_1, 'Sector'] = 'Technology'
-    df_out.loc[condicion_1, 'Industry'] = 'Scientific And Technical Instruments'
+    casos = [
+        # Se imputan con la tupla: (Ticker, Sector, Industry)
+        ('MKSI', 'Technology', 'Scientific And Technical Instruments'),
+        # Agregar nuevos casos aquí
+        
+    ]
+    for ticker, sector, industry in casos:
+        condicion = (df_out['Ticker'] == ticker)
+        df_out.loc[condicion, 'Sector'] = sector
+        df_out.loc[condicion, 'Industry'] = industry
 
     return df_out
