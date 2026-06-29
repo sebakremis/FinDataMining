@@ -582,6 +582,7 @@ def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana:
     """
     Calcula retornos y el ShortTermBeta del activo respecto al mercado.
     Aplica un rezago (lag) de 1 periodo para evitar Data Leakage.
+    Incluye un flag 'ReturnIsMissing' para registrar imputaciones.
     """       
     ticker_mercado = df_index['Ticker'].iloc[0]
     
@@ -589,35 +590,40 @@ def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana:
     df_unido = pd.concat([df, df_index], ignore_index=True)
     df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Open').sort_index()
     
-    # pct_change usa (t / t-1) - 1. Imputar missings con 0 (valor neutral)
-    df_retornos = df_pivot.pct_change(fill_method=None).fillna(0)
+    # Calcular retornos en bruto, extraer flag y luego imputar
+    df_retornos_raw = df_pivot.pct_change(fill_method=None)
+    df_return_is_missing = df_retornos_raw.isna().astype(int)
+    df_retornos = df_retornos_raw.fillna(0)
     
     retornos_mercado = df_retornos[ticker_mercado]
     df_activos = df_retornos.drop(columns=[ticker_mercado])
+    df_missing_activos = df_return_is_missing.drop(columns=[ticker_mercado]) # Extraer flag del mercado
     
     # Calcular estadísticas móviles
-    # Para el Beta necesitamos la varianza del MERCADO y la covarianza de cada ACTIVO con el MERCADO
     varianza_mercado = retornos_mercado.rolling(window=ventana, min_periods=min_periodos).var()
     covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
-    
-    # Calcular el ShortTermBeta: Covarianza(Activo, Mercado) / Varianza(Mercado)
     df_betas = covarianzas.div(varianza_mercado, axis=0)
     
-    # Aplicar lag de 1 periodo (Lo que pasó en t, se mueve a t+1 para ser usado como Feature)
+    # Aplicar lag de 1 periodo a todas las features, incluyendo el flag
     df_activos_lag = df_activos.shift(1)
     df_betas_lag = df_betas.shift(1)
+    df_missing_lag = df_missing_activos.shift(1) 
     
-    # Transformar cada matriz a formato largo (melt) usando los DataFrames rezagados
+    # Transformar cada matriz a formato largo (melt)
     df_ret_long = df_activos_lag.reset_index().melt(
         id_vars='Date', var_name='Ticker', value_name='QuarterlyReturn_Lag1'
     )
-    
     df_beta_long = df_betas_lag.reset_index().melt(
         id_vars='Date', var_name='Ticker', value_name='ShortTermBeta'
     )
+    df_missing_long = df_missing_lag.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='ReturnIsMissing_Lag1'
+    )
     
-    # Consolidar todas las features en un solo DataFrame (Varianza y Covarianza excluidas)
-    df_features = df_ret_long.merge(df_beta_long, on=['Date', 'Ticker'])
+    # Consolidar todas las features en un solo DataFrame
+    df_features = (df_ret_long
+                   .merge(df_beta_long, on=['Date', 'Ticker'])
+                   .merge(df_missing_long, on=['Date', 'Ticker']))
     
     # Unir las features con el DataFrame original
     df_final = pd.merge(df, df_features, on=['Date', 'Ticker'], how='left')
