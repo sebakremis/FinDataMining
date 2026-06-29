@@ -10,6 +10,7 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
+from sklearn.preprocessing import PowerTransformer
 from src.clean_transform import corregir_anomalias, imputar_info
 from src.config import cols_balance, cols_cashflow, cols_resultados, data_folder
 
@@ -64,7 +65,11 @@ def mostrar_missings(df:pd.DataFrame)->pd.Series:
     """
     Calcula la proporción de valores nulos por columna usando operaciones vectorizadas.
     """
-    return df.isna().mean().sort_values(ascending=False)
+    # Se calcula la proporción de nulos para todas las columnas
+    missings = df.isna().mean()
+    
+    # Se filtran donde el valor es mayor a 0, ordenando luego de mayor a menor
+    return missings[missings > 0].sort_values(ascending=False)
 
 
 import pandas as pd
@@ -301,7 +306,42 @@ def quitar_nulos_relevantes(df:pd.DataFrame, cols_no_relevantes:list[str]=[])->p
     return df_out
 
 
+def imputar_crecimientos(df:pd.DataFrame, cols:list[str])->pd.DataFrame:
+    """
+    Imputa las columnas de crecimiento con un valor neutral,
+    igual a la tasa de inflación promedio de EE.UU.
+    """
+    df_out = df.copy()
+
+    # Constantes macroeconómicas neutrales
+    YOY_NEUTRAL = 0.0300
+    QOQ_NEUTRAL = 0.0074
+
+    # Se regeneran los nombres de las columnas de crecimiento QoQ y YoY
+    cols_QoQ = [f'{col}_QoQ' for col in cols]
+    cols_YoY = [f'{col}_YoY' for col in cols]  
+    crecimiento_cols = cols_QoQ + cols_YoY
+
+    for col in crecimiento_cols:
+        if 'YoY' in col:
+            # Crear la variable flag
+            df_out[f'{col}_IsMissing'] = df_out[col].isna().astype(int)
+            
+            # Imputar con tasa neutral anual
+            df_out[col] = df_out[col].fillna(YOY_NEUTRAL)
+
+        elif 'QoQ' in col:   
+            # Crear la variable flag
+            df_out[f'{col}_IsMissing'] = df_out[col].isna().astype(int)
+            
+            # Imputar con tasa neutral trimestral
+            df_out[col] = df_out[col].fillna(QOQ_NEUTRAL)
+
+    return df_out
+
+
 # --- Funciones de Feature Engineering ---
+
 
 def obtener_cols_financieras(incluirTTM:bool=True)->list:
     if incluirTTM:
@@ -499,18 +539,16 @@ def calcular_crecimientos(df:pd.DataFrame, crecimiento_cols:list[str])->pd.DataF
     crecimiento si el período anterior era negativo.
     """
     df_out = df.copy()
+
     for col in crecimiento_cols:
         prev_rev_4 = df_out.groupby('Ticker')[col].shift(4)
         df_out[f'{col}_YoY'] = (df_out[col] - prev_rev_4) / prev_rev_4.abs()
         prev_rev_1 = df_out.groupby('Ticker')[col].shift(1)
         df_out[f'{col}_QoQ'] = (df_out[col] - prev_rev_1) / prev_rev_1.abs()
 
-        # Acotar si quedan resultados absurdos que puedan quedar de dividir por números pequeños
-        df_out[f'{col}_YoY'] = df_out[f'{col}_YoY'].clip(lower=-10.0, upper=10.0) # Acota entre -1000% y +1000%
+        # Acotar entre -1000% y +1000% si quedan resultados absurdos al dividir entre cero o números pequeños
+        df_out[f'{col}_YoY'] = df_out[f'{col}_YoY'].clip(lower=-10.0, upper=10.0)
         df_out[f'{col}_QoQ'] = df_out[f'{col}_QoQ'].clip(lower=-10.0, upper=10.0)
-
-    # Reemplazar por NaN todos los infinitos generados por divisiones por cero
-    df_out.replace([np.inf, -np.inf], np.nan, inplace=True)
 
     return df_out
 
@@ -532,9 +570,17 @@ def calcular_aceleraciones(df:pd.DataFrame, cols:list)-> pd.DataFrame:
     return df_out
 
 
-def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4, min_periodos: int = 2) -> pd.DataFrame:
+def calcular_lag(df:pd.DataFrame, cols:list,q:int=1)->pd.DataFrame:
+    for col in cols:
+        df[col+f'_Lag{q}'] = df[col].shift(q)
+
+    df.drop(columns=cols, inplace=True)
+    return df
+
+
+def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4, min_periodos: int = 2) -> pd.DataFrame:
     """
-    Calcula retornos, varianza del activo y covarianza con el mercado.
+    Calcula retornos y el ShortTermBeta del activo respecto al mercado.
     Aplica un rezago (lag) de 1 periodo para evitar Data Leakage.
     """       
     ticker_mercado = df_index['Ticker'].iloc[0]
@@ -543,48 +589,40 @@ def calcular_retornos(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4
     df_unido = pd.concat([df, df_index], ignore_index=True)
     df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Open').sort_index()
     
-    # pct_change usa (t / t-1) - 1
-    df_retornos = df_pivot.pct_change(fill_method=None)
+    # pct_change usa (t / t-1) - 1. Imputar missings con 0 (valor neutral)
+    df_retornos = df_pivot.pct_change(fill_method=None).fillna(0)
     
     retornos_mercado = df_retornos[ticker_mercado]
     df_activos = df_retornos.drop(columns=[ticker_mercado])
     
     # Calcular estadísticas móviles
-    varianzas_activos = df_activos.rolling(window=ventana, min_periods=min_periodos).var()
+    # Para el Beta necesitamos la varianza del MERCADO y la covarianza de cada ACTIVO con el MERCADO
+    varianza_mercado = retornos_mercado.rolling(window=ventana, min_periods=min_periodos).var()
     covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
+    
+    # Calcular el ShortTermBeta: Covarianza(Activo, Mercado) / Varianza(Mercado)
+    df_betas = covarianzas.div(varianza_mercado, axis=0)
     
     # Aplicar lag de 1 periodo (Lo que pasó en t, se mueve a t+1 para ser usado como Feature)
     df_activos_lag = df_activos.shift(1)
-    varianzas_activos_lag = varianzas_activos.shift(1)
-    covarianzas_lag = covarianzas.shift(1)
+    df_betas_lag = df_betas.shift(1)
     
     # Transformar cada matriz a formato largo (melt) usando los DataFrames rezagados
     df_ret_long = df_activos_lag.reset_index().melt(
         id_vars='Date', var_name='Ticker', value_name='QuarterlyReturn_Lag1'
     )
-    df_var_long = varianzas_activos_lag.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='QuarterlyVariance_Lag1'
-    )
-    df_cov_long = covarianzas_lag.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='MarketCovariance_Lag1'
+    
+    df_beta_long = df_betas_lag.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='ShortTermBeta'
     )
     
-    # Consolidar todas las features en un solo DataFrame
-    df_features = df_ret_long.merge(df_var_long, on=['Date', 'Ticker'])
-    df_features = df_features.merge(df_cov_long, on=['Date', 'Ticker'])
+    # Consolidar todas las features en un solo DataFrame (Varianza y Covarianza excluidas)
+    df_features = df_ret_long.merge(df_beta_long, on=['Date', 'Ticker'])
     
     # Unir las features con el DataFrame original
     df_final = pd.merge(df, df_features, on=['Date', 'Ticker'], how='left')
     
     return df_final
-
-
-def calcular_lag(df:pd.DataFrame, cols:list,q:int=1)->pd.DataFrame:
-    for col in cols:
-        df[col+f'_Lag{q}'] = df[col].shift(4)
-
-    df.drop(columns=cols, inplace=True)
-    return df
 
 
 def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
@@ -661,6 +699,19 @@ def plot(col):
 
 
 # --- Funciones de Transformación
+
+def transformar_yeo_johnson(df: pd.DataFrame, cols: list) -> pd.DataFrame:
+    df_out = df.copy()
+
+    # Inicializar el PowerTransformer
+    pt = PowerTransformer(method='yeo-johnson', standardize=True)
+
+    # Se aplica la función y elimina la columna original
+    for col in cols:
+        df_out[f'{col}_YeoTransformed'] = pt.fit_transform(df_out[[col]])
+        df_out.drop(col, axis=1, inplace=True)
+        
+    return df_out
 
 def transformar_log(df: pd.DataFrame, cols: list, calculo_1p: bool = False) -> pd.DataFrame:
     # Creamos una copia para no alterar el DataFrame original accidentalmente
@@ -740,7 +791,9 @@ def main():
     # Se asegura el ordenamiento por fecha
     df = df.sort_values(by='Date').reset_index(drop=True)
 
+
     # --- Limpieza de datos ---
+
 
     # Limpiar cadenas de texto en Sector y Industry
     df = limpiar_industry_y_sector(df)
@@ -756,39 +809,41 @@ def main():
     # --- Tratamiento Inicial de Missings ---
 
     # Se imputan los missing detectados en Industry y Sector
-    df_clean = imputar_info(df_clean)
+    df_info_imputed = imputar_info(df_clean)
 
     # imputar equivalencias financieras
-    df_fin_imputed = imputar_equivalencias_financieras(df_clean)
+    df_fin_imputed = imputar_equivalencias_financieras(df_info_imputed)
 
     # Se imputan las columnas financieras, por su media o mediana móvil según sus asimetrías
-    df_fin_imputed = imputar_numericas(df_fin_imputed)
+    df_num_imputed = imputar_numericas(df_fin_imputed)
 
     # Se eliminan missings en columnas numéricas relevantes
     cols_no_relevantes = ['GrossProfit', 'FinancingCashFlow', 'InvestingCashFlow']
-    df_fin_imputed = quitar_nulos_relevantes(df_fin_imputed, cols_no_relevantes)
+    df_imputed = quitar_nulos_relevantes(df_num_imputed, cols_no_relevantes)
 
     print("Tratamiento Inicial de Missings finalizado.")
 
+
     # --- Feature Engineering ---
 
+
     # Variables TTM
-    df_with_features = transformar_flujos_a_ttm(df_fin_imputed)
+    df_with_ttm = transformar_flujos_a_ttm(df_imputed)
 
     # Crear feature YearsSinceAdded
-    df_with_features = crear_years_since_added(df_with_features)
+    df_with_years_since_added = crear_years_since_added(df_with_ttm)
 
     # Calcular métricas financieras y ratios de valuación:
-    df_with_features = calcular_metricas(df_with_features)
+    df_with_metrics = calcular_metricas(df_with_years_since_added)
 
     # Calcular AverageDailyVolume
-    df_with_features = convertir_volumen_a_adv(df_with_features)
+    df_volume_converted = convertir_volumen_a_adv(df_with_metrics)
 
     # Aplicar lag de un trimestre a Volume
     columnas_lag1 = ['AverageDailyVolume']
-    df_with_features = calcular_lag(df_with_features, columnas_lag1, q=1)
+    df_volume_converted = calcular_lag(df_volume_converted, columnas_lag1, q=1)
 
-    # Calcular crecimientos y aceleraciones
+    # Calcular crecimientos
     crecimiento_cols = [
         'TotalRevenue_TTM',
         'EBITDA_TTM',
@@ -796,33 +851,43 @@ def main():
         'CapitalExpenditure_TTM',
         'AverageDailyVolume_Lag1'
     ]
-    df_with_features = calcular_crecimientos(df_with_features, crecimiento_cols)
-    df_with_features = calcular_aceleraciones(df_with_features, crecimiento_cols)
+    df_with_growth = calcular_crecimientos(df_volume_converted, crecimiento_cols)
+
+    # Antes de calcular las aceleraciones, se imputan crecimientos desconocidos 
+    # con tasas de crecimiento neutral (tasa de inflación).
+    df_growth_imputed = imputar_crecimientos(df_with_growth, crecimiento_cols)
+
+    # Se calculan las aceleraciones
+    df_with_acc = calcular_aceleraciones(df_growth_imputed, crecimiento_cols)
 
     # Calcular retornos
     # Se abre el fichero de precios del Índice del Mercado para calcular las covarianzas
     df_index = pd.read_parquet(f"{data_folder}/market_index.parquet")
 
-    df_with_features = calcular_retornos(df_with_features, df_index)  
+    df_with_returns = calcular_retornos_y_betas(df_with_acc, df_index)  
 
     # Calcular tamaños relativos: RelativeAssets y RelativeRevenue
-    df_with_features = calcular_relative_size(df_with_features)
+    df_with_features = calcular_relative_size(df_with_returns)
 
     print("Feature Engineering finalizado.")
 
+
     # --- Tratamiento Final de Missings ---
 
+
     # Se aplica la imputación de medias móviles sobre las nuevas variables
-    df_imputed = imputar_numericas(df_with_features)
+    df_final_num_imputed = imputar_numericas(df_with_features)
 
     # Se eliminan missings remanentes en columnas numéricas relevantes
     cols_no_relevantes = []
-    df_imputed = quitar_nulos_relevantes(df_imputed, cols_no_relevantes)
+    df_final_imputed = quitar_nulos_relevantes(df_final_num_imputed, cols_no_relevantes)
 
     print("Tratamiento de Missings finalizado.")
 
+
     # --- Transformaciones ---
    
+
     # Transformaciones logarítmicas
     columnas_a_transformar = [ 
         'CapExToRevenue',
@@ -833,14 +898,16 @@ def main():
         ]
 
     df_transformed = transformar_log(
-        df_imputed, 
+        df_final_imputed, 
         columnas_a_transformar, 
         calculo_1p=True
         )
     
     print("Transformaciones finalizadas.")
 
+
     # --- Tratamiento de Outliers ---
+
 
     # Definir columnas que saltean la "winsorización"
     cols_fin_clean = obtener_cols_financieras(incluirTTM=True)
@@ -866,7 +933,9 @@ def main():
 
     print("Gestión de outliers finalizada.")
 
+
     # --- Concatenación final y almacenamiento ---
+
 
     df_non_numeric_transformed = df_transformed_features.select_dtypes(exclude='number')
     # Se unen variables contínuas transformadas y variables no numéricas
