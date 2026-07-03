@@ -39,7 +39,7 @@ El pipeline de extracción obtiene datos históricos de precios de mercado y los
 
 - `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio web (https://simfin.com/). Las instrucciones para ingresar la clave en el repositorio se encuentran en el fichero src/data_sources.example.py.
 
-Otra restricción de la cuenta básica de `simFin` es que no ofrece información histórica completa para todos los tickers. Se define entonces un universo de 550 empresas a partir de aquellas que, teniendo una cantidad mínima de información trimestral disponible, presentan un mayor nivel de ventas en promedio. De aquellos 550 tickers algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, contando el dataset actual con un total de 521 compañías.
+Otra restricción de la cuenta básica de `simFin` es que no ofrece información histórica completa para todos los tickers. Se define entonces un universo de 550 empresas a partir de aquellas que, teniendo una cantidad mínima de información trimestral disponible, presentan un mayor nivel de ventas en promedio. De los 550 tickers obtenidos inicialmente, algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, pudiendo reemplazarlos por nuevos tickers si se repite la fase de extracción.
 
 ---
 ## 🚧 Estado del Proyecto
@@ -62,7 +62,7 @@ FINDATAMINING/
 │   ├── raw_data.parquet             # Datos crudos generados por la fase de Extracción
 │   ├── clean_data.parquet           # Datos limpios generados en la fase Transform
 │   ├── market_index.parquet         # Datos históricos de precios del índice del mercado
-│   ├── tickers_universe.csv         # Se guardan los tickers sobre los cuales exiten datos
+│   ├── tickers_sin_datos.csv        # Tickers con datos faltantes, serán excluídos en las extracciones sucesivas
 ├── src/                             # Sub-directorio con los módulos de funciones auxiliares
 │   ├── __init__.py                  # Fichero vacío, inicializa la carpeta como paquete
 │   ├── clean_transform.py           # Módulo auxiliar de limpieza de datos para la fase de transformación

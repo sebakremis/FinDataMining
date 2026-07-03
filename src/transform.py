@@ -829,24 +829,26 @@ def main():
     # --- Limpieza de datos ---
 
     # Limpiar cadenas de texto en Sector y Industry
-    df = limpiar_industry_y_sector(df)
+    df_clean = limpiar_industry_y_sector(df)
 
     # Columnas financieras y volumen expresadas en millones
-    df = columnas_en_millones(df)
+    df_clean = columnas_en_millones(df_clean)
 
     # Corrección de anomalías
-    df_clean = corregir_anomalias(df)
+    df_clean = corregir_anomalias(df_clean)
 
     print("Limpieza de datos finalizada.")
 
 
     # --- Tratamiento Inicial de Missings ---
 
-    # Se imputan los missing detectados en Industry y Sector
-    df_info_imputed = imputar_info(df_clean)
+    # Si se detectan missing  en Industry y Sector:
+    #df_clean = recuperar_info(df_clean)
+    # Si persistieran casos, imputar manualmente en el modulo clean_transform:
+    #df_clean = imputar_info(df_clean)
 
     # imputar equivalencias financieras
-    df_fin_imputed = imputar_equivalencias_financieras(df_info_imputed)
+    df_fin_imputed = imputar_equivalencias_financieras(df_clean)
 
     # Se imputan las columnas financieras, por su media o mediana móvil según sus asimetrías
     df_num_imputed = imputar_numericas(df_fin_imputed)
