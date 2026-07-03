@@ -3,11 +3,12 @@ from pathlib import Path
 
 # Establecer ubicación de datos
 data_folder = "data"
-tickers_file = Path(data_folder) / "tickers_universe.csv"
+raw_data_file = Path(data_folder) / "raw_data.parquet"
+ruta_sin_datos = Path(data_folder) / "tickers_sin_datos.csv"
 
 # Definir periodo de extracción e intervalo de precios
 periodo = '6y'  
-intervalo = '3mo'
+intervalo = '1mo'
 
 # Mapeo de tickers que cambiaron de nombre
 cambios_tickers = {

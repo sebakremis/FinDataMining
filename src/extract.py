@@ -16,7 +16,8 @@ from src.data_sources import simfin_api_key
 from src.config import (
     periodo, intervalo, cols_resultados, cols_balance,
     cols_cashflow, data_folder, mapa_columnas,
-    retardo_publicacion, tickers_file, cambios_tickers
+    retardo_publicacion, cambios_tickers,
+    ruta_sin_datos, raw_data_file
 )
 
 def clean_ticker(s):
@@ -79,14 +80,11 @@ def extraer_simfin() -> pd.DataFrame:
 
     # Limpieza de tickers usando la misma función auxiliar que los Tickers S&P 500
     df_consolidado['Ticker'] = df_consolidado['Ticker'].map(clean_ticker)
-
-    # Se seleccionan los tickers del S&P500
-    #df_final = df_consolidado[df_consolidado['Ticker'].isin(tickers_validos)]
     
     return df_consolidado
 
 
-def generar_universo_tickers(df: pd.DataFrame, 
+def generar_universo_tickers(df_simfin_raw: pd.DataFrame, 
                              umbral_filas: int = 19, 
                              columna_ranking: str = 'Revenue', 
                              cantidad_tickers: int = 550)->list:
@@ -94,10 +92,22 @@ def generar_universo_tickers(df: pd.DataFrame,
     Se genera el fichero del universo de tickers obtendidos de finSim:
     1. Filtra los tickers que superen el umbral mínimo de trimestres disponibles.
     2. Agrupa por ticker y calcula el promedio de su métrica para ranquearlos.
-    3. Selecciona el top N y guarda en CSV.
+    3. Selecciona el top N y devuelve la lista.
     """
-    # Limpiar tickers
+    df = df_simfin_raw.copy()
+    # Normalizar tickers: limpieza y corrección de nombres 
     df['Ticker'] = df['Ticker'].map(clean_ticker)
+    df['Ticker'] = df['Ticker'].map(lambda t: cambios_tickers.get(t, t))
+
+
+    # Filtrar tickers sin datos
+    if ruta_sin_datos.exists():
+        df_excluidos = pd.read_csv(ruta_sin_datos)
+        
+        if 'Ticker' in df_excluidos.columns:
+            df_excluidos['Ticker'] = df_excluidos['Ticker'].map(clean_ticker)
+            tickers_excluidos = df_excluidos['Ticker'].tolist()
+            df = df[~df['Ticker'].isin(tickers_excluidos)]
 
     # Contar y filtrar tickers válidos
     counts = df.groupby("Ticker").size()
@@ -107,22 +117,125 @@ def generar_universo_tickers(df: pd.DataFrame,
     # Calcular un valor representativo de 'Revenue' por empresa.
     ranking_metricas = df_filtrado.groupby("Ticker")[columna_ranking].mean()
     
-    # Se ordenan de mayor a menor y tomar el Top
+    # Se ordenan de mayor a menor y tomar el Top N
     top_tickers = ranking_metricas.sort_values(ascending=False).head(cantidad_tickers).index.tolist()
 
-    # Se modifican los tickers que hayan cambiado de nombre
-    tickers_corregidos = [cambios_tickers.get(t, t) for t in top_tickers]
-
-    # Quitar si existen duplicados
-    tickers_unicos = list(set([str(t) for t in tickers_corregidos]))
+    # Asegurar que no existan duplicados preservando el orden
+    tickers_unicos = list(dict.fromkeys([str(t) for t in top_tickers]))
     
     return tickers_unicos
 
 
-def extraer_precios(tickers_list: list) -> pd.DataFrame:
+def estandarizar_simfin(df_raw: pd.DataFrame) -> pd.DataFrame:
+    df = df_raw.copy()
+    
+    # Renombrar las columnas según el mapa
+    df.rename(columns=mapa_columnas, inplace=True)
+
+    # Se crean las columnas faltantes vacías, luego serán calculadas en la fase de transformación
+    cols_faltantes = ['EBITDA', 'Total Debt', 'Free Cash Flow']
+    df[cols_faltantes] = np.nan
+
+    # Salvavidas para evitar NaT masivos
+    # simFin deja 'Report Date' tras resetear el índice en extraer_simfin
+    if 'Report Date' in df.columns:
+        if 'Publish Date' in df.columns:
+            # Rellenar vacíos de Publish Date con Report Date
+            df['Publish Date'] = df['Publish Date'].fillna(df['Report Date'])
+        else:
+            # Si Publish Date no existe, usar Report Date directamente
+            df['Publish Date'] = df['Report Date']
+
+    # Asegurar que Publish Date es un formato datetime
+    df['Publish Date'] = pd.to_datetime(df['Publish Date'])
+
+    # Llevar la fecha de publicación real al primer día del mes siguiente
+    df['Date'] = df['Publish Date'] + pd.offsets.MonthBegin(1)
+
+    #  Extraer los nombres de las columnas destino de yfinance desde el diccionario
+    cols_yfinance = list(mapa_columnas.values())
+    
+    # Combinar las columnas del mapa con las creadas manualmente.
+    # Se usa dict.fromkeys() para eliminar posibles duplicados manteniendo el orden.
+    columnas_deseadas = list(dict.fromkeys(cols_yfinance + cols_faltantes + ['Date', 'Ticker']))
+    
+    # Filtrar columnas que realmente existan en el df actual
+    columnas_finales = [col for col in columnas_deseadas if col in df.columns]
+
+    # Quitar las columnas que ya no hacen falta
+    df = df[columnas_finales]
+
+    # Se agrega columna 'FinancialsSource' para indicar que los datos provienen de simFin
+    df['FinancialsSource'] = 'simFin'
+
+    # Eliminar posibles fechas futuras generadas por la alineación mensual
+    hoy = pd.Timestamp.today().normalize()
+    df = df[df['Date'] <= hoy]
+
+    return df
+
+
+def gestionar_actualizacion(tickers_universe_list: list, df_simfin_standarized:pd.DataFrame) -> tuple[list, pd.DataFrame]:
+
+    
+    # Si el archivo no existe, devuelve la lista completa
+    if not raw_data_file.exists():
+        return tickers_universe_list, df_simfin_standarized
+    
+    # Leer del fichero guardado las columnas necesarias para la validación
+    df_existente = pd.read_parquet(raw_data_file, columns=['Ticker', 'Date'])
+    
+    # Asegurar consistencia de tipos de datos antes del cruce
+    df_existente['Date'] = pd.to_datetime(df_existente['Date'])
+
+    # Actualizar simFin
+    # Se filtran las filas de df_simfin_standarized cuyos Ticker y Date no esten en el df_existente
+    # Realizamos un 'left join' indicando de dónde proviene cada fila
+    df_merged = df_simfin_standarized.merge(
+        df_existente[['Ticker', 'Date']].drop_duplicates(), 
+        on=['Ticker', 'Date'], 
+        how='left', 
+        indicator=True
+    )
+    
+    # Filtramos las filas que solo existen en el DataFrame izquierdo (df_simfin_standarized)
+    # y luego eliminamos la columna auxiliar '_merge'
+    df_simfin_new_data = df_merged[df_merged['_merge'] == 'left_only'].drop(columns=['_merge'])
+
+    # Actualizar yfinance
+    hoy = pd.Timestamp.today().normalize()
+    fecha_ultimo_precio = hoy.replace(day=1)
+
+    # Verificar si los tickers están actualizados en el fichero
+    # Agrupar por Ticker para obtener la fecha más reciente almacenada para cada uno
+    ultimas_fechas_guardadas = df_existente.groupby('Ticker')['Date'].max()
+
+    new_prices_tickers = []
+    
+    # Verificar si los tickers están actualizados en el fichero
+    for ticker in tickers_universe_list:
+        # Condición 1: El ticker ni siquiera existe en el archivo parquet
+        if ticker not in ultimas_fechas_guardadas:
+            new_prices_tickers.append(ticker)
+        # Condición 2: El ticker existe, pero su última fecha es anterior al último cierre requerido
+        elif ultimas_fechas_guardadas[ticker] < fecha_ultimo_precio:
+            new_prices_tickers.append(ticker)
+
+ 
+    return new_prices_tickers, df_simfin_new_data
+
+
+def extraer_precios(tickers_list: list) -> tuple[pd.DataFrame,list]:
     """
     Extrae precios históricos en lote y formatea las fechas para cruzar con datos fundamentales.
+    Retorna un DataFrame con los precios y una lista con los tickers que no arrojaron datos.
     """
+    # Se omite la descarga si no hay tickers en la lista
+    if not tickers_list:
+        print("No hay tickers pendientes de actualización. Omitiendo descarga...")
+        df_vacio = pd.DataFrame(columns=['Date', 'Ticker', 'Open'])
+        return df_vacio, []
+
     # Asegurar que no existan duplicados
     tickers_unicos = list(set([str(t) for t in tickers_list]))
     
@@ -173,10 +286,24 @@ def extraer_precios(tickers_list: list) -> pd.DataFrame:
     df_prices.dropna(subset=['Close'], inplace=True)
     
     # Reiniciar el índice
-    df_prices.reset_index(drop=True, inplace=True)    
+    df_prices.reset_index(drop=True, inplace=True)   
+
+    # Identificar tickers sin datos
+    if not df_prices.empty and 'Ticker' in df_prices.columns:
+        tickers_obtenidos = df_prices['Ticker'].unique().tolist()
+    else:
+        tickers_obtenidos = []
+        
+    # Restamos los conjuntos: Originales - Obtenidos = Fallidos
+    tickers_sin_datos = list(set(tickers_unicos) - set(tickers_obtenidos))
+    
+    if tickers_sin_datos:
+        print(f"Advertencia: No se encontraron datos para {len(tickers_sin_datos)} tickers.") 
 
     print("Extracción completada.")
-    return df_prices
+    
+    # Devolvemos ambos objetos
+    return df_prices, tickers_sin_datos
 
 
 def descargar_constituents_sp(force_update=False):
@@ -242,37 +369,9 @@ def extraer_info(tickers_list:list)->pd.DataFrame:
     if dfs_info:
         return pd.DataFrame(dfs_info)
     else:
-        return pd.DataFrame()
-
-
-def alinear_fecha_trimestral(fecha):
-    """
-    Desplaza una fecha hacia el próximo 1er día de los meses 3, 6, 9 o 12.
-    Postura estricta: Si la publicación es el mismo día 1, se pasa al trimestre
-    siguiente para evitar lookahead bias en precios de apertura.
-    """
-    if pd.isna(fecha):
-        return fecha
-        
-    m = fecha.month
-    y = fecha.year
-    
-    # Al usar estrictamente '<', cualquier publicación en marzo (incluyendo el día 1) 
-    # salta automáticamente a junio.
-    # Aún si la publicación hubiese sido el mismo primer día del trimestre antes de la apertura (BMO),
-    # cualquier gap en el precio de apertura habría sido inalcanzable. 
-    if m < 3:
-        return pd.Timestamp(year=y, month=3, day=1)
-    elif m < 6:
-        return pd.Timestamp(year=y, month=6, day=1)
-    elif m < 9:
-        return pd.Timestamp(year=y, month=9, day=1)
-    elif m < 12:
-        return pd.Timestamp(year=y, month=12, day=1)
-    else:
-        # Diciembre (mes 12) completo pasa a marzo del año siguiente
-        return pd.Timestamp(year=y + 1, month=3, day=1)
-    
+        df_vacio = pd.DataFrame(columns= ['Date', 'Ticker', 'Open'])
+        return df_vacio
+  
 
 def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tuple[pd.DataFrame, list[str]]:
     """
@@ -369,8 +468,9 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
                     print(f"Aviso: Error obteniendo fechas reales para {ticker}. Usando estimación. ({e})")
                     df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=retardo_publicacion)).dt.normalize()
 
-            # --- TRANSFORMACIÓN DE FECHAS #2: ALINEACIÓN TRIMESTRAL ---
-            df_temp['Date'] = pd.to_datetime(df_temp['Date']).apply(alinear_fecha_trimestral)
+            # --- TRANSFORMACIÓN DE FECHAS #2: ALINEACIÓN MENSUAL ---
+            # Se lleva la fecha al dia 1 del mes siguiente
+            df_temp['Date'] = df_temp['Date'] + pd.offsets.MonthBegin(1)
 
             if not df_temp.empty:
                 dfs_lista.append(df_temp)
@@ -386,32 +486,51 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
     # Concatenación final
     if dfs_lista:
         df_final = pd.concat(dfs_lista, axis=0, ignore_index=True)
+
+        # Se agrega columna 'FinancialsSource' para indicar que los datos provienen de yfinance
+        df_final['FinancialsSource'] = 'yfinance'
+
         return df_final, tickers_sin_datos
     else:
         return pd.DataFrame(), tickers_sin_datos
 
 
-def estandarizar_simfin(df_raw:pd.DataFrame, cols:list) -> pd.DataFrame:
-    df = df_raw.copy()
-    df.rename(columns=mapa_columnas, inplace=True)
+def guardar_tickers_sin_datos(sin_datos_set: set): 
+    if not sin_datos_set:
+        return
 
-    # Se crean las columnas faltantes vacías, luego serán calculadas en la fase de transformación
-    cols_faltantes = ['EBITDA', 'Total Debt', 'Free Cash Flow']
-    df[cols_faltantes] = np.nan
+    tickers_totales = set(sin_datos_set)
 
-    # Asegurar que Publish Date es un formato datetime
-    df['Publish Date'] = pd.to_datetime(df['Publish Date'])
+    if ruta_sin_datos.exists() and ruta_sin_datos.stat().st_size > 0:
+        with open(ruta_sin_datos, "r", encoding="utf-8") as f:
+            next(f, None)  # Salta la cabecera
+            for linea in f:
+                ticker = linea.strip()
+                if ticker:
+                    tickers_totales.add(ticker)
 
-    # Llevar la fecha de publicación real al primer día del trimestre siguiente
-    df['Date'] = pd.to_datetime(df['Publish Date']).apply(alinear_fecha_trimestral)
-
-    #  Quitar las columnas que ya no hacen falta para que coincida con yfinance
-    df = df[cols]
-
-    return df
+    with open(ruta_sin_datos, "w", encoding="utf-8") as f:
+        f.write("Ticker\n")  
+        for ticker in sorted(tickers_totales):
+            f.write(f"{ticker}\n")
 
 
 def unir_financials(df_yfinance: pd.DataFrame, df_simfin: pd.DataFrame) -> pd.DataFrame:
+
+    # Retornos tempranos si hay dataframes vacíos
+    if df_yfinance.empty and df_simfin.empty:
+        print("Ambos DataFrames están vacíos. Omitiendo unión...")
+        # Garantizamos la estructura mínima para no romper procesos posteriores
+        return pd.DataFrame(columns=['Ticker', 'Date'])
+        
+    if df_yfinance.empty:
+        print("Datos de yfinance vacíos. Se utilizarán solo los datos de SimFin.")
+        return df_simfin.drop_duplicates(subset=['Ticker', 'Date'], keep='last').reset_index(drop=True)
+        
+    if df_simfin.empty:
+        print("Datos de SimFin vacíos. Se utilizarán solo los datos de yfinance.")
+        return df_yfinance.drop_duplicates(subset=['Ticker', 'Date'], keep='last').reset_index(drop=True)
+
     # Eliminar posibles duplicados INTERNOS en cada DataFrame antes de cruzarlos
     df_yf_unique = df_yfinance.drop_duplicates(subset=['Ticker', 'Date'], keep='last')
     df_sf_unique = df_simfin.drop_duplicates(subset=['Ticker', 'Date'], keep='last') 
@@ -430,31 +549,66 @@ def unir_financials(df_yfinance: pd.DataFrame, df_simfin: pd.DataFrame) -> pd.Da
     # Ajustar la columna 'FinancialsSource' para registros mezclados
     # Si un registro estaba en ambos, indicamos que contiene datos combinados
     if 'FinancialsSource' in df_financials_idx.columns:
+
         df_financials_idx.loc[idx_solapados, 'FinancialsSource'] = 'yfinance + simFin'
+    
+    print(f"Se han encontrado {len(idx_solapados)} filas con Ticker y Date solapados (presentes en ambas fuentes).")
 
     # Se devuelven 'Ticker' y 'Date' como columnas normales
     df_unido = df_financials_idx.reset_index()
 
-    # Auditoría de solapamientos
-    print(f"Se han encontrado {len(idx_solapados)} filas con Ticker y Date solapados (presentes en ambas fuentes).")
+    # Se eliminan filas sin datos financieros: no deberia suceder en esta etapa, se agrega por las dudas
+    # Eliminar filas que no tengan ninguna de las columnas críticas 
+    columnas_criticas = ['Operating Income', 'EBITDA', 'Net Income', 'Total Assets', 'Total Liabilities']
+
+    # Se asegura buscar solo las columnas que realmente existan en el DataFrame
+    # para evitar un KeyError en caso de que alguna no haya sido descargada.
+    columnas_presentes = [col for col in columnas_criticas if col in df_unido.columns]
+    
+    # Se eliminan filas solo si todas las métricas presentes son NaN (how='all')
+    if columnas_presentes:
+        df_unido = df_unido.dropna(subset=columnas_presentes, how='all')
+    
 
     return df_unido
 
 
 def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
-    # Eliminar posibles fechas futuras
-    hoy = pd.Timestamp.today().normalize()
-    df = df[df['Date'] <= hoy]
+
+    # --- Cláusula de retorno temprano
+    if df.empty:
+        print("El DataFrame a limpiar está vacío. Omitiendo proceso de limpieza...")
+        # Nos aseguramos de mantener la coherencia eliminando espacios en columnas si las hay
+        df.columns = df.columns.str.replace(' ', '')
+        return df
+        
+    # Validar que existan las columnas clave antes de ordenar
+    if 'Ticker' not in df.columns or 'Date' not in df.columns:
+        print("Advertencia: El DataFrame no contiene las columnas 'Ticker' o 'Date'. Abortando limpieza...")
+        return df
 
     # Ordenar cronológicamente
     df = df.sort_values(by=['Ticker', 'Date'])
 
-    # Eliminar las filas anteriores al primer reporte financiero disponible
-    columna_critica = 'Operating Income' 
-    df_clean = df.dropna(subset=[columna_critica])
+    # Resetear el índice
+    df_clean = df.reset_index(drop=True)
 
-    # Resetear el índice para que quede de 0 a N
-    df_clean = df_clean.reset_index(drop=True)
+    #  Extraer los nombres de las columnas financieras de yfinance desde el diccionario
+    cols_financieras = list(mapa_columnas.values()) + ['FinancialsSource']
+    cols_presentes_fin = [col for col in cols_financieras if col in df_clean.columns]
+    
+    # Se aplica forward fill a las columnas financieras, para completar datos de granularidad mensual
+    # Se tolera una demora máxima de 6 meses en la presentación del siguiente reporte trimestral (limit=6)
+    if cols_presentes_fin:
+        df_clean[cols_presentes_fin] = df_clean.groupby('Ticker')[cols_presentes_fin].ffill(limit=6)
+
+    # Eliminar filas que no tengan datos en las columnas críticas: 
+    # precio 'Open' y al menos una métrica financiera clave
+    df_clean = df_clean.dropna(subset=['Close'])
+
+    metrica_control = [col for col in ['Total Assets', 'Net Income'] if col in df_clean.columns]
+    if metrica_control:
+        df_clean = df_clean.dropna(subset=metrica_control, how='all')
 
     # Eliminar espacios en los nombres de las columnas
     df_clean.columns = df_clean.columns.str.replace(' ', '')
@@ -462,16 +616,40 @@ def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
     return df_clean
 
 
-def guardar_fichero_tickers(tickers:list):
-    # Crear dataframe de tickers
-    df_tickers_universe = pd.DataFrame({'Ticker': tickers})
+def guardar_raw_data(df_final_clean:pd.DataFrame)->pd.DataFrame:
+    df_datos_nuevos = df_final_clean.copy()
 
-    # Guardar los tickers actualizados
-    df_tickers_universe.to_csv(tickers_file, index=False)
+    # Validar si realmente hay datos nuevos para guardar
+    if not df_datos_nuevos.empty:
+        
+        if raw_data_file.exists():
+            df_historico = pd.read_parquet(raw_data_file)
+            
+            # Establecer Ticker y Date como índices para alinear los datos
+            df_historico.set_index(['Ticker', 'Date'], inplace=True)
+            df_datos_nuevos.set_index(['Ticker', 'Date'], inplace=True)
+            
+            # combine_first: Prioriza df_datos_nuevos, pero si hay un NaN, usa el valor de df_historico (modelo "Upsert")
+            df_consolidado_idx = df_datos_nuevos.combine_first(df_historico)
+            
+            # Restaurar las columnas normales
+            df_consolidado = df_consolidado_idx.reset_index()
+            
+        else:
+            # Si el fichero no existe, el consolidado son los datos actuales
+            df_consolidado = df_datos_nuevos
 
+        # Guardar el dataframe completo consolidado
+        df_consolidado.to_parquet(raw_data_file, index=False)
+        
+        print(f"Extracción finalizada.\nDatos guardados exitosamente en '{raw_data_file}'.")
+        return df_consolidado
+    else:
+        print("Extracción finalizada. No se detectaron datos nuevos para agregar.")
+        return pd.DataFrame()
+    
 
 # --- Función auxiliar para analizar el retardo de publicación ---
-
 
 def analizar_retardo_publicacion(tickers_list: list) -> pd.Series:
     """
@@ -567,118 +745,107 @@ Puedes modificar el parámetro en el fichero src/config.py
 def main():
     print("\n--- Extracción de datos financieros de simFin ---\n")
 
+    # Extraer datos de simFin
     df_simfin_unfiltered = extraer_simfin()
+
+    # Genera el universo inicial de tickers según los criterios establecidos
     tickers_universe_list = generar_universo_tickers(df_simfin_unfiltered)
 
-    # Se agrega columna 'FinancialsSource' para indicar que los datos provienen de simFin
-    df_simfin_unfiltered['FinancialsSource'] = 'simFin'
+    # Filtra los tickers del universo
+    df_simfin_filtered = df_simfin_unfiltered[df_simfin_unfiltered['Ticker'].isin(tickers_universe_list)]
 
-    print("Datos extraidos de simFin, dimensiones:", df_simfin_unfiltered.shape)
+    # Estandarizar columnas y fechas para que coincidan con el formato de yfinance
+    df_simfin_standarized = estandarizar_simfin(df_simfin_filtered)
+    print("Datos extraidos de simFin, dimensiones:", df_simfin_standarized.shape) 
 
-    print("\n--- Extracción de precios de `yfinance` ---\n")
 
-    print("Extrayendo precios de yfinance, demora unos minutos...")
-    df_prices = extraer_precios(tickers_universe_list)
+    print("\n--- Extracción de precios de yfinance ---\n")
+
+    # Si existe un fichero raw_data guardado, se verifican los datos que requieran actualización
+    new_data_tickers, df_simfin_new_data = gestionar_actualizacion(tickers_universe_list, df_simfin_standarized)
+
+    # Extraer precios y obtener lista de tickers sin precios
+    df_prices, tickers_sin_precios = extraer_precios(new_data_tickers)
 
     # Se extrae precio del Índice de Mercado para usar en cálculos y se guarda en fichero 
-    df_index = extraer_precios(['SPY'])
+    df_index, _ = extraer_precios(['SPY'])
     df_index.to_parquet(f"{data_folder}/market_index.parquet")
 
-    print("Extraídos precios del universo de tickers y del índice.")
-    print("Dimensiones de df_precios:", df_prices.shape)
-    print("Dimensiones de df_index:", df_index.shape)
+    # Se guardan los tickers que obtuvieron precios para filtrar al extraer info y financials de yfinance
+    tickers_con_precios_nuevos = df_prices['Ticker'].unique().tolist()
 
-    # Actualizar el universo de tickers con los que se obtuvieron precios
-    tickers_list_updated = df_prices['Ticker'].unique().tolist()
-    print("Actualizado el universo a tickers con precios disponibles en yfinance.")
-    print("Cantidad de tickers actualizado:", len(tickers_list_updated))
+    print(f"Precios extraídos para {len(tickers_con_precios_nuevos)} tickers.")  
+
 
     print("\n--- Extracción de datos complementarios ---\n")
-
-    # Obtener constituents del indice S&P 500
+  
+    # Obtener los componentes del índice S&P 500
     ruta_sp500 = descargar_constituents_sp(force_update=False) 
 
-    # Cargar y limpiar datos de constituents
-    print("Cargando los tickers del S&P 500.")
+    # Cargar y limpiar datos
+    print("Extrayendo información complementaria")
     df_tickers_sp_raw = pd.read_csv(ruta_sp500)
     df_tickers_sp = limpiar_constituents_sp(df_tickers_sp_raw)
-    print("Cantidad de tickers en el índice:", df_tickers_sp['Ticker'].nunique())
 
-    # Unir df_prices y df_tickers
-    df_merged = pd.merge(
-        df_prices,
+    # Extraer info de Sector e Industry de yfinance
+    df_info = extraer_info(tickers_con_precios_nuevos)
+
+    # Se unen los datos complementarios
+    df_supplementary = pd.merge(
+        df_info,
         df_tickers_sp,
         on= 'Ticker',
         how= 'left'
     )
-    print("Unidos precios con 'DateAdded' del índice S&P500. Dimensiones:", df_merged.shape)
+    print("Unidos los datos complementarios. Dimensiones:", df_supplementary.shape)
 
-    # Extraer de yfinance info de sector e industria
-    print("Extrayendo info de 'Industry' y 'Sector' de yfinance. Demora unos minutos...")
-    df_info = extraer_info(tickers_list_updated)
-    print("Extracción de info finalizada. Dimensiones:",df_info.shape)
 
-    # Se unen los dataframes
-    df_with_info = pd.merge(
-        df_merged,
-        df_info,
-        on= 'Ticker',
-        how= 'left'
-    )
-    print("Unidos precios e info. Dimensiones:", df_with_info.shape)
+    print("\n--- Extracción de datos financieros de yfinance ---\n")
 
-    print("\n--- Extracción de  datos financieros de yfinance ---\n")
-
-    print("Extrayendo datos financieros de yfinance. Demora varios minutos...")
-    df_yfinance, tickers_sin_datos = extraer_financials(tickers_list_updated, aproximar_fechas = False)
-
-    # Se agrega columna 'FinancialsSource' para indicar que los datos provienen de yfinance
-    df_yfinance['FinancialsSource'] = 'yfinance'
-
+    print("Extrayendo datos financieros de yfinance, puede demorar varios minutos.")
+    df_yfinance, tickers_sin_financials = extraer_financials(
+        tickers_con_precios_nuevos, 
+        aproximar_fechas = False
+        )
     print("Extracción de financials de yfinance finalizada. Dimensiones:", df_yfinance.shape)
 
-    # --- VALIDACIÓN DE SEGURIDAD ---
-    if df_yfinance.empty:
-        print("Error Crítico: No se han podido extraer datos de yfinance. Se aborta la ejecución para evitar corrupción de datos.")
-        return # Sale de la función main
-    # -------------------------------------
 
     print("\n--- Unión de datasets y almacenamiento ---\n")
 
-    # Se convierte la lista de tickers sin datos de yfinance a un set
-    sin_datos_set = set(tickers_sin_datos)
+    # Se guardan los tickers sin datos en fichero .csv para descartarlos si se itera la extracción
+    sin_datos_set = set(tickers_sin_precios+tickers_sin_financials)
+    guardar_tickers_sin_datos(sin_datos_set)
 
-    # Actualizar la lista de tickers en el universo y guardarlo en el fichero tickers_universe.csv
-    tickers_list_updated = [ticker for ticker in tickers_list_updated if ticker not in sin_datos_set]
-    guardar_fichero_tickers(tickers_list_updated)
-    print(f"Universo de tickers guardado en fichero. Total: {len(tickers_list_updated)} tickers.")
-
-    # Filtrar los tickers actualizados en los datos de simFin
-    df_simfin = df_simfin_unfiltered[df_simfin_unfiltered['Ticker'].isin(tickers_list_updated)]
-
-    # Definir columnas a mantener en simFin para que coincidan y estandarizar antes de unir
-    cols_yfinance = df_yfinance.columns.to_list()
-    df_simfin_clean = estandarizar_simfin(df_simfin, cols_yfinance)
-
-    df_financials_completo = unir_financials(df_yfinance, df_simfin_clean)
+    df_financials_completo = unir_financials(df_yfinance, df_simfin_new_data)  
     print("Unidos datasets de financials. Dimensiones:", df_financials_completo.shape)
 
-    # Unir dataframe de precios con datos financieros
-    df_final = pd.merge(
-        df_with_info, 
+    # Unir precios con datos financieros
+    df_merged = pd.merge(
+        df_prices, 
         df_financials_completo, 
         on=['Date', 'Ticker'],
-        how='left'
+        how='left' 
     )
-    print("Unidos datasets de precios y financials. Dimensiones:", df_final.shape)
+    print("Unidos datasets de precios y financials. Dimensiones:", df_merged.shape)
+
+    # Se agregan las columnas de info complementaria
+    df_final = pd.merge(
+        df_merged, 
+        df_supplementary, 
+        on=['Ticker'],
+        how='left' 
+    )
+    print("Columnas de info complementaria agregadas. Dimensiones:", df_final.shape)
 
     # Limpieza final
     df_final_clean = limpieza_final(df_final)
     print("Dimensiones del dataset final limpio:", df_final_clean.shape)
 
-    # Guardar datos extraidos en fichero raw_data
-    df_final_clean.to_parquet(f"{data_folder}/raw_data.parquet")
-    print(f"Extracción finalizada.\nFichero 'raw_data.parquet' guardado en la carpeta {data_folder}")
+    # Guardar/actualizar fichero raw_data
+    df_guardado = guardar_raw_data(df_final_clean)
+    df_guardado.info()
+    print("Tickers sin datos:", len(sin_datos_set))
+    print("Tickers guardados:", len(df_guardado['Ticker'].unique().tolist()))    
 
 if __name__ == "__main__":
     main()

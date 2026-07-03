@@ -12,6 +12,7 @@ import seaborn as sns
 import plotly.express as px
 from sklearn.preprocessing import PowerTransformer
 from src.clean_transform import corregir_anomalias, imputar_info
+from src.extract import extraer_info
 from src.config import cols_balance, cols_cashflow, cols_resultados, data_folder
 
 # --- Funciones de Limpieza de Datos ---
@@ -46,8 +47,35 @@ def limpiar_industry_y_sector(df:pd.DataFrame)->pd.DataFrame:
     df_out['Sector'] = df_out['Sector'].astype('category')
     df_out['Industry'] = df_out['Industry'].astype('category')
 
-    return df_out
+    return df_out   
+
+
+def recuperar_info(df:pd.DataFrame)->pd.DataFrame:
+    df_out = df.copy()
+    tickers = df_out[df_out['Sector'].isna() | df_out['Industry'].isna()]['Ticker'].unique().tolist()
+    if len(tickers)==0:
+        print("No se encontraron valores perdidos de Sectores/Industrias.")
+        return df_out
+
+    info_recuperada = extraer_info(tickers)
+
+    # Validar que se hayan recuperado los datos
+    if info_recuperada.empty or 'Sector' not in info_recuperada.columns:
+        print("No se recuperó información válida de Sectores/Industrias.")
+        return df_out
+
+    for ticker in tickers:
+        # Se filtra el dataframe de info recuperada para el ticker actual
+        info_ticker = (info_recuperada[info_recuperada['Ticker'] == ticker])
+
+        if not info_ticker.empty:
+            sector_val = info_ticker['Sector'].values[0]
+            industry_val = info_ticker['Industry'].values[0]
+
+            df_out.loc[df_out['Ticker']==ticker, 'Sector'] = sector_val
+            df_out.loc[df_out['Ticker']==ticker, 'Industry'] = industry_val
     
+    return df_out
 
 
 def columnas_en_millones(df:pd.DataFrame)->pd.DataFrame:
@@ -215,7 +243,7 @@ def imputar_equivalencias_financieras(df: pd.DataFrame) -> pd.DataFrame:
         df_imputado.loc[cond_solo_current_liab, 'TotalLiabilities']    = df_imputado.loc[cond_solo_current_liab, 'CurrentLiabilities'] / RATIO_CL
         df_imputado.loc[cond_solo_current_liab, 'TotalNoncurrentLiabilities'] = df_imputado.loc[cond_solo_current_liab, 'TotalLiabilities'] * RATIO_NCL
 
-        # =========================================================================
+    # =========================================================================
     # 5. IMPUTACIONES DE BALANCE GENERAL (ACTIVOS CORRIENTES)
     # =========================================================================
     
@@ -383,20 +411,20 @@ def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
     # Ordenar por Ticker y Date para que el rolling sea cronológico
     df_ttm = df_ttm.sort_values(by=['Ticker', 'Date'])
     
-    # CALCULAR TTM: Agrupar por Ticker y aplicar suma móvil de 4 trimestres
+    # CALCULAR TTM: Agrupar por Ticker y aplicar suma móvil de 12 meses
     for col in cols_presentes:
         nuevo_nombre = f"{col}_TTM"
         if col == 'BasicAverageShares': 
             # Se calcula el promedio para esta variable
             df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
-                lambda x: x.rolling(window=4, min_periods=1).mean() # Al ser un promedio y poco volátil, se puede reducir la ventana
+                lambda x: x.rolling(window=12, min_periods=3).mean() # Al ser un promedio y poco volátil, se puede reducir la ventana
             )
         else:
             # Para el resto se calcula la suma
-            # MAGIA MATEMÁTICA: Promedio móvil * 4 equivale a sumar cuando la ventana es de 4, 
-            # permitiendo anualizar cuando hay menos de 4 valores en la ventana (se evitan NaNs al principio)
+            # MAGIA MATEMÁTICA: Promedio móvil * 12 equivale a sumar cuando la ventana es de 12, 
+            # permitiendo anualizar cuando hay menos de 12 valores en la ventana (se evitan NaNs al principio)
             df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
-                lambda x: x.rolling(window=4, min_periods=1).mean() * 4
+                lambda x: x.rolling(window=12, min_periods=3).mean() * 12
             )
         
     # 3. LIMPIAR: Descartar las columnas originales de flujo
@@ -426,8 +454,8 @@ def crear_years_since_added(df:pd.DataFrame)->pd.DataFrame:
 
 def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Recibe el DataFrame limpio de precios trimestrales y datos fundamentales alineados, 
-    y calcula métricas financieras históricas orientadas a Machine Learning.
+    Recibe el DataFrame limpio de precios mensuales y datos fundamentales alineados, 
+    y calcula métricas financieras históricas.
     """
     # Definir columnas necesarias para calcular
     cols_necesarias = [
@@ -526,7 +554,7 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def convertir_volumen_a_adv(df:pd.DataFrame)->pd.DataFrame:
-    df['AverageDailyVolume'] = df['Volume'] / 63 # estimado de 63 días hábiles por trimestre
+    df['AverageDailyVolume'] = df['Volume'] / 21 # estimado de 21 días hábiles por mes
     df.drop('Volume', axis=1, inplace=True)
     return df
 
@@ -541,10 +569,10 @@ def calcular_crecimientos(df:pd.DataFrame, crecimiento_cols:list[str])->pd.DataF
     df_out = df.copy()
 
     for col in crecimiento_cols:
-        prev_rev_4 = df_out.groupby('Ticker')[col].shift(4)
-        df_out[f'{col}_YoY'] = (df_out[col] - prev_rev_4) / prev_rev_4.abs()
-        prev_rev_1 = df_out.groupby('Ticker')[col].shift(1)
-        df_out[f'{col}_QoQ'] = (df_out[col] - prev_rev_1) / prev_rev_1.abs()
+        prev_rev_12 = df_out.groupby('Ticker')[col].shift(12)
+        df_out[f'{col}_YoY'] = (df_out[col] - prev_rev_12) / prev_rev_12.abs()
+        prev_rev_3 = df_out.groupby('Ticker')[col].shift(3)
+        df_out[f'{col}_QoQ'] = (df_out[col] - prev_rev_3) / prev_rev_3.abs()
 
         # Acotar entre -1000% y +1000% si quedan resultados absurdos al dividir entre cero o números pequeños
         df_out[f'{col}_YoY'] = df_out[f'{col}_YoY'].clip(lower=-10.0, upper=10.0)
@@ -570,15 +598,15 @@ def calcular_aceleraciones(df:pd.DataFrame, cols:list)-> pd.DataFrame:
     return df_out
 
 
-def calcular_lag(df:pd.DataFrame, cols:list,q:int=1)->pd.DataFrame:
+def calcular_lag(df:pd.DataFrame, cols:list,months:int=1)->pd.DataFrame:
     for col in cols:
-        df[col+f'_Lag{q}'] = df[col].shift(q)
+        df[col+f'_Lag{months}'] = df[col].shift(months)
 
     df.drop(columns=cols, inplace=True)
     return df
 
 
-def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 4, min_periodos: int = 2) -> pd.DataFrame:
+def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = 6) -> pd.DataFrame:
     """
     Calcula retornos y el ShortTermBeta del activo respecto al mercado.
     Aplica un rezago (lag) de 1 periodo para evitar Data Leakage.
@@ -800,7 +828,6 @@ def main():
 
     # --- Limpieza de datos ---
 
-
     # Limpiar cadenas de texto en Sector y Industry
     df = limpiar_industry_y_sector(df)
 
@@ -811,6 +838,7 @@ def main():
     df_clean = corregir_anomalias(df)
 
     print("Limpieza de datos finalizada.")
+
 
     # --- Tratamiento Inicial de Missings ---
 
@@ -831,7 +859,6 @@ def main():
 
 
     # --- Feature Engineering ---
-
 
     # Variables TTM
     df_with_ttm = transformar_flujos_a_ttm(df_imputed)
@@ -880,7 +907,6 @@ def main():
 
     # --- Tratamiento Final de Missings ---
 
-
     # Se aplica la imputación de medias móviles sobre las nuevas variables
     df_final_num_imputed = imputar_numericas(df_with_features)
 
@@ -891,8 +917,7 @@ def main():
     print("Tratamiento de Missings finalizado.")
 
 
-    # --- Transformaciones ---
-   
+    # --- Transformaciones ---  
 
     # Transformaciones logarítmicas
     columnas_a_transformar = [ 
@@ -913,7 +938,6 @@ def main():
 
 
     # --- Tratamiento de Outliers ---
-
 
     # Definir columnas que saltean la "winsorización"
     cols_fin_clean = obtener_cols_financieras(incluirTTM=True)
@@ -941,7 +965,6 @@ def main():
 
 
     # --- Concatenación final y almacenamiento ---
-
 
     df_non_numeric_transformed = df_transformed_features.select_dtypes(exclude='number')
     # Se unen variables contínuas transformadas y variables no numéricas

@@ -35,34 +35,37 @@ def corregir_anomalias(df:pd.DataFrame)->pd.DataFrame:
     clean_df['TotalRevenue'] = np.where(condicion_2, np.nan, clean_df['TotalRevenue']) 
 
     # Caso 3:  Deuda negativa
-    condicion_3 = (clean_df['CurrentDebt'] < 0) | (clean_df['LongTermDebt'] < 0)
+    condicion_3_current_debt = (clean_df['CurrentDebt'] < 0)
+    condicion_3_longterm_debt = (clean_df['LongTermDebt'] < 0)
 
-    # Se eliminan los registros
-    clean_df = clean_df[~condicion_3].reset_index(drop=True)
+    # Se asignan a NaN
+    clean_df['CurrentDebt'] = np.where(condicion_3_current_debt, np.nan, clean_df['CurrentDebt']) 
+    clean_df['LongTermDebt'] = np.where(condicion_3_longterm_debt, np.nan, clean_df['LongTermDebt'])
 
     # Caso 4:  Depreciación y Amortización negativa de yfinance
-    condicion_4 = (df['DepreciationAndAmortization'] < 0) & (df['FinancialsSource']=='yfinance')
+    condicion_4 = (clean_df['DepreciationAndAmortization'] < 0) & (clean_df['FinancialsSource']=='yfinance')
 
-    # Se reemplazan por cero
-    df.loc[condicion_4,'DepreciationAndAmortization'] = 0
+    # Se asignan a NaN
+    clean_df.loc[condicion_4,'DepreciationAndAmortization'] = np.nan
 
     # Caso 5: Depreciación y Amortización negativa de simFin
-    condicion_5 = (df['DepreciationAndAmortization'] < 0) & (df['FinancialsSource']=='simFin')
+    condicion_5 = (clean_df['DepreciationAndAmortization'] < 0) & (clean_df['FinancialsSource']=='simFin')
 
     # Se convierten a positivos
-    df.loc[condicion_5, 'DepreciationAndAmortization'] = df.loc[condicion_5, 'DepreciationAndAmortization'].abs()
+    clean_df.loc[condicion_5, 'DepreciationAndAmortization'] = clean_df.loc[condicion_5, 'DepreciationAndAmortization'].abs()
 
     return clean_df
 
 
 def imputar_info(df:pd.DataFrame)->pd.DataFrame:
     """
-    Se imputan manualmente los missings encontrados en Sector e Industry
+    Para imputar manualmente si quedan missings remanentes en Sector e Industry
     """
     df_out = df.copy()
     casos = [
         # Se imputan con la tupla: (Ticker, Sector, Industry)
         ('MKSI', 'Technology', 'Scientific And Technical Instruments'),
+        ('WTW', 'Financial Services', 'Insurance Brokers'),
         # Agregar nuevos casos aquí
         
     ]
