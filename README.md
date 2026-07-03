@@ -8,7 +8,7 @@
 Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) para construir un dataset financiero sobre acciones que cotizan en EE.UU. Una vez procesados, normalizados y limpios, los datos son utilizados en la fase de modelado predictivo para entrenar algoritmos de Machine Learning.
 
 Cuenta con tres fases:
-* *Extracción*: obtención de datos a través de APIs.
+* *Extracción*: obtención de datos a través de APIs. Permite actualizar datos, reduciendo los tiempos de ejecución al repetir el flujo de extracción.
 * *Transformación*: limpieza de errores, imputación de valores perdidos, transformaciones y gestión de outliers.
 * *Modelado*: feature engineering, aplicación de modelo *RandomForest* con datos completos, prueba de validación cruzada con partición de series temporales, evaluación de resultados, exportación de datos y predicciones, explicabilidad del modelo y optimización de hiper-parámetros.
 
@@ -46,10 +46,9 @@ Otra restricción de la cuenta básica de `simFin` es que no ofrece información
 
 `finDataMining` presenta actualmente dos formas de ejecución:
 * **Jupyter Notebooks:** Están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
-* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar rápidamente los mismos pasos desde el terminal. Ambas formas funcionan correctamente, pero a veces `yfinance` no devuelve información financiera para muchos tickers. Sospecho se debe a micro-cortes en mi conección a internet. Recomiendo entonces ejecutar la extracción desde el notebook, contrayendo celdas y ejecutando de a bloques, para evitar tener que reiniciar todo el flujo en caso de fallas en las descargas.
+* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar los mismos pasos desde el terminal. El objetivo es utilizar estos modulos para automatizar el pipeline desde el futuro panel de control. Ambas formas de ejecución funcionan correctamente, pero a veces `yfinance` no devuelve información financiera para muchos tickers. Puede deberse a micro-cortes en la conección a internet o a restricciones de la API. Recomiendo entonces ejecutar la primera extracción desde el notebook de a bloques, para evitar tener que reiniciar todo el flujo en caso de fallas en las descargas.
 * **Panel de Control** (planificado): Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline, así como la visualización dinámica de las variables. 
 
-También esta previsto implementar características para actualizar y gestionar la base de datos.
 
 ---
 ## 🗂️ Estructura Actual
