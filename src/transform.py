@@ -12,8 +12,10 @@ import seaborn as sns
 import plotly.express as px
 from sklearn.preprocessing import PowerTransformer
 from src.clean_transform import corregir_anomalias, imputar_info
-from src.extract import extraer_info
-from src.config import cols_balance, cols_cashflow, cols_resultados, data_folder
+from src.extract import extraer_info, obtener_cols_financieras
+from src.config import (
+    raw_data_file, clean_data_file, market_index_file
+)
 
 # --- Funciones de Limpieza de Datos ---
 
@@ -79,7 +81,7 @@ def recuperar_info(df:pd.DataFrame)->pd.DataFrame:
 
 
 def columnas_en_millones(df:pd.DataFrame)->pd.DataFrame:
-    cols = obtener_cols_financieras(incluirTTM=False)
+    cols = obtener_cols_financieras(incluirTTM=True)
     cols.append('Volume') # se convierte también el volumen
     cols.append('CashAndCashEquivalents') # no está en la lista de columnas de yfinance
     set_cols = set(cols)
@@ -115,13 +117,13 @@ def imputar_equivalencias_financieras(df: pd.DataFrame) -> pd.DataFrame:
     
     # Se imputan a cero los valores faltantes en "DepreciationAndAmortization".
     # Se asume que es cero ya que empresas donde no es relevante no lo informan.
-    df_imputado['DepreciationAndAmortization'] = df_imputado['DepreciationAndAmortization'].fillna(0)
+    df_imputado['DepreciationAndAmortization_TTM'] = df_imputado['DepreciationAndAmortization_TTM'].fillna(0)
 
     # Se imputa 'EBITDA' mediante la ecuación: EBITDA = Operating Income + D&A
-    cond_falta_ebitda = df_imputado['EBITDA'].isna() & df_imputado['OperatingIncome'].notna()
-    df_imputado.loc[cond_falta_ebitda, 'EBITDA'] = (
-        df_imputado.loc[cond_falta_ebitda, 'OperatingIncome'] + 
-        df_imputado.loc[cond_falta_ebitda, 'DepreciationAndAmortization']
+    cond_falta_ebitda = df_imputado['EBITDA_TTM'].isna() & df_imputado['OperatingIncome_TTM'].notna()
+    df_imputado.loc[cond_falta_ebitda, 'EBITDA_TTM'] = (
+        df_imputado.loc[cond_falta_ebitda, 'OperatingIncome_TTM'] + 
+        df_imputado.loc[cond_falta_ebitda, 'DepreciationAndAmortization_TTM']
     )
 
     # =========================================================================
@@ -130,11 +132,11 @@ def imputar_equivalencias_financieras(df: pd.DataFrame) -> pd.DataFrame:
     
     # Imputar FreeCashFlow (Fórmula: FreeCashFlow = OperatingCashFlow - Capital Expenditure)
     # Se usa .abs() en CapEx para estandarizar salidas de caja y restarlas correctamente
-    if 'FreeCashFlow' in df_imputado.columns and 'OperatingCashFlow' in df_imputado.columns and 'CapitalExpenditure' in df_imputado.columns:
-        cond_falta_fcf = df_imputado['FreeCashFlow'].isna() & df_imputado['OperatingCashFlow'].notna() & df_imputado['CapitalExpenditure'].notna()
-        df_imputado.loc[cond_falta_fcf, 'FreeCashFlow'] = (
-            df_imputado.loc[cond_falta_fcf, 'OperatingCashFlow'] - 
-            df_imputado.loc[cond_falta_fcf, 'CapitalExpenditure'].abs()
+    if 'FreeCashFlow_TTM' in df_imputado.columns and 'OperatingCashFlow_TTM' in df_imputado.columns and 'CapitalExpenditure_TTM' in df_imputado.columns:
+        cond_falta_fcf = df_imputado['FreeCashFlow_TTM'].isna() & df_imputado['OperatingCashFlow_TTM'].notna() & df_imputado['CapitalExpenditure_TTM'].notna()
+        df_imputado.loc[cond_falta_fcf, 'FreeCashFlow_TTM'] = (
+            df_imputado.loc[cond_falta_fcf, 'OperatingCashFlow_TTM'] - 
+            df_imputado.loc[cond_falta_fcf, 'CapitalExpenditure_TTM'].abs()
         )
 
     # =========================================================================
@@ -369,72 +371,6 @@ def imputar_crecimientos(df:pd.DataFrame, cols:list[str])->pd.DataFrame:
 
 
 # --- Funciones de Feature Engineering ---
-
-
-def obtener_cols_financieras(incluirTTM:bool=True)->list:
-    if incluirTTM:
-        cadena = '_TTM'
-    else:
-        cadena = ''
-    
-    cols_cashflow_ttm = [col + cadena for col in cols_cashflow]
-    cols_resultados_ttm = [col + cadena for col in cols_resultados]
-    cols_financieras_raw = cols_balance + cols_cashflow_ttm + cols_resultados_ttm
-    cols_financieras = [col.replace(' ', '') for col in cols_financieras_raw]
-
-    return cols_financieras
-
-
-def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Transforma variables financieras de flujo a TTM (Trailing Twelve Months) 
-    sumando los últimos 4 trimestres. Añade el sufijo '_TTM' y elimina las originales.
-    
-    Args:
-        df (pd.DataFrame): DataFrame original con datos trimestrales.
-        cols_income (list): Lista de columnas del Income Statement (ej. TotalRevenue, NetIncome).
-        cols_cashflow (list): Lista de columnas del Cash Flow (ej. OperatingCashFlow).
-        
-    Returns:
-        pd.DataFrame: DataFrame con las columnas TTM calculadas y las originales eliminadas.
-    """
-    # Crear una copia para evitar modificar el DataFrame original por referencia
-    df_ttm = df.copy()
-    
-    # Unir las listas de variables de flujo
-    cols_flujo_raw = cols_resultados + cols_cashflow
-    cols_flujo = [col.replace(' ', '') for col in cols_flujo_raw]
-    
-    # Filtrar para operar sólo sobre las columnas que realmente existen en el DataFrame
-    cols_presentes = [col for col in cols_flujo if col in df_ttm.columns]
-    
-    # Ordenar por Ticker y Date para que el rolling sea cronológico
-    df_ttm = df_ttm.sort_values(by=['Ticker', 'Date'])
-    
-    # CALCULAR TTM: Agrupar por Ticker y aplicar suma móvil de 12 meses
-    for col in cols_presentes:
-        nuevo_nombre = f"{col}_TTM"
-        if col == 'BasicAverageShares': 
-            # Se calcula el promedio para esta variable
-            df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
-                lambda x: x.rolling(window=12, min_periods=3).mean() # Al ser un promedio y poco volátil, se puede reducir la ventana
-            )
-        else:
-            # Para el resto se calcula la suma
-            # MAGIA MATEMÁTICA: Promedio móvil * 12 equivale a sumar cuando la ventana es de 12, 
-            # permitiendo anualizar cuando hay menos de 12 valores en la ventana (se evitan NaNs al principio)
-            df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
-                lambda x: x.rolling(window=12, min_periods=3).mean() * 12
-            )
-        
-    # 3. LIMPIAR: Descartar las columnas originales de flujo
-    df_ttm = df_ttm.drop(columns=cols_presentes)
-    
-    # Restaurar el orden original del índice por consistencia
-    df_ttm = df_ttm.sort_index()
-    
-    return df_ttm
-
 
 def crear_years_since_added(df:pd.DataFrame)->pd.DataFrame:
     #  Pasar DateAdded a formato datetime, los NaN se vuelven NaT (not a time)
@@ -820,7 +756,7 @@ def main():
     # --- Preliminares ---
 
     # Abrir archivo raw_data
-    df = pd.read_parquet(f"{data_folder}/raw_data.parquet")
+    df = pd.read_parquet(raw_data_file)
 
     # Se asegura el ordenamiento por fecha
     df = df.sort_values(by='Date').reset_index(drop=True)
@@ -848,35 +784,32 @@ def main():
     #df_clean = imputar_info(df_clean)
 
     # imputar equivalencias financieras
-    df_fin_imputed = imputar_equivalencias_financieras(df_clean)
+    df_financials_imputed = imputar_equivalencias_financieras(df_clean)
 
     # Se imputan las columnas financieras, por su media o mediana móvil según sus asimetrías
-    df_num_imputed = imputar_numericas(df_fin_imputed)
+    df_financials_imputed = imputar_numericas(df_financials_imputed)
 
     # Se eliminan missings en columnas numéricas relevantes
     cols_no_relevantes = ['GrossProfit', 'FinancingCashFlow', 'InvestingCashFlow']
-    df_imputed = quitar_nulos_relevantes(df_num_imputed, cols_no_relevantes)
+    df_financials_imputed = quitar_nulos_relevantes(df_financials_imputed, cols_no_relevantes)
 
     print("Tratamiento Inicial de Missings finalizado.")
 
 
     # --- Feature Engineering ---
 
-    # Variables TTM
-    df_with_ttm = transformar_flujos_a_ttm(df_imputed)
-
     # Crear feature YearsSinceAdded
-    df_with_years_since_added = crear_years_since_added(df_with_ttm)
+    df_with_features = crear_years_since_added(df_financials_imputed)
 
     # Calcular métricas financieras y ratios de valuación:
-    df_with_metrics = calcular_metricas(df_with_years_since_added)
+    df_with_features = calcular_metricas(df_with_features)
 
     # Calcular AverageDailyVolume
-    df_volume_converted = convertir_volumen_a_adv(df_with_metrics)
+    df_with_features = convertir_volumen_a_adv(df_with_features)
 
     # Aplicar lag de un trimestre a Volume
     columnas_lag1 = ['AverageDailyVolume']
-    df_volume_converted = calcular_lag(df_volume_converted, columnas_lag1, q=1)
+    df_with_features = calcular_lag(df_with_features, columnas_lag1, months=1)
 
     # Calcular crecimientos
     crecimiento_cols = [
@@ -886,23 +819,23 @@ def main():
         'CapitalExpenditure_TTM',
         'AverageDailyVolume_Lag1'
     ]
-    df_with_growth = calcular_crecimientos(df_volume_converted, crecimiento_cols)
+    df_with_features = calcular_crecimientos(df_with_features, crecimiento_cols)
 
     # Antes de calcular las aceleraciones, se imputan crecimientos desconocidos 
     # con tasas de crecimiento neutral (tasa de inflación).
-    df_growth_imputed = imputar_crecimientos(df_with_growth, crecimiento_cols)
+    df_with_features = imputar_crecimientos(df_with_features, crecimiento_cols)
 
     # Se calculan las aceleraciones
-    df_with_acc = calcular_aceleraciones(df_growth_imputed, crecimiento_cols)
+    df_with_features = calcular_aceleraciones(df_with_features, crecimiento_cols)
 
     # Calcular retornos
     # Se abre el fichero de precios del Índice del Mercado para calcular las covarianzas
-    df_index = pd.read_parquet(f"{data_folder}/market_index.parquet")
+    df_index = pd.read_parquet(market_index_file)
 
-    df_with_returns = calcular_retornos_y_betas(df_with_acc, df_index)  
+    df_with_features = calcular_retornos_y_betas(df_with_features, df_index)  
 
     # Calcular tamaños relativos: RelativeAssets y RelativeRevenue
-    df_with_features = calcular_relative_size(df_with_returns)
+    df_with_features = calcular_relative_size(df_with_features)
 
     print("Feature Engineering finalizado.")
 
@@ -910,11 +843,11 @@ def main():
     # --- Tratamiento Final de Missings ---
 
     # Se aplica la imputación de medias móviles sobre las nuevas variables
-    df_final_num_imputed = imputar_numericas(df_with_features)
+    df_imputed = imputar_numericas(df_with_features)
 
     # Se eliminan missings remanentes en columnas numéricas relevantes
     cols_no_relevantes = []
-    df_final_imputed = quitar_nulos_relevantes(df_final_num_imputed, cols_no_relevantes)
+    df_imputed = quitar_nulos_relevantes(df_imputed, cols_no_relevantes)
 
     print("Tratamiento de Missings finalizado.")
 
@@ -931,7 +864,7 @@ def main():
         ]
 
     df_transformed = transformar_log(
-        df_final_imputed, 
+        df_imputed, 
         columnas_a_transformar, 
         calculo_1p=True
         )
@@ -976,8 +909,12 @@ def main():
     df_final = pd.concat([df_passthrough, df_combined], axis=1)
 
     # Guardar datos extraidos en fichero clean_data
-    df_final.to_parquet(f"{data_folder}/clean_data.parquet")
-    print(f"Transformación finalizada.\nFichero 'clean_data.parquet' guardado en la carpeta {data_folder}.")
+    # Asegurar que la estructura de directorios exista
+    clean_data_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Guardar el dataframe
+    df_final.to_parquet(clean_data_file)
+    print(f"Transformación finalizada.\nFichero 'clean_data.parquet' guardado en la carpeta de datos.")
     print("Dimensión de datos finales:", df_final.shape)
 
 if __name__ == "__main__":

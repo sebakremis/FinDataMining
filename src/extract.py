@@ -384,9 +384,12 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
     - Devuelve el dataframe obtenido y la lista de tickers de los cuales no se obtuvieron datos.
     """
     dfs_lista = []
-    tickers_sin_datos = []      
+    tickers_sin_datos = []
+    total_tickers = len(tickers_list)      
 
-    for ticker in tickers_list:
+    for i, ticker in enumerate(tickers_list, start=1):
+        # Sobreescribe la misma línea en cada iteración
+        print(f"\rProcesando {i}/{total_tickers}: {ticker}...    ", end="", flush=True)
         try:
             yf_ticker = yf.Ticker(ticker)
             
@@ -463,9 +466,11 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
                                 real_dates.append((q_end + pd.Timedelta(days=retardo_publicacion)).normalize())
                         df_temp['Date'] = real_dates
                     else:
+                        print(f"Aviso: Datos de ganancias vacíos para {ticker}. Usando estimación.")
                         df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=retardo_publicacion)).dt.normalize()
                 except Exception as e:
-                    print(f"Aviso: Error obteniendo fechas reales para {ticker}. Usando estimación. ({e})")
+                    # Este except solo saltará si yfinance se cae por un error de conexión u otro bug interno
+                    print(f"Aviso: Error crítico obteniendo fechas para {ticker}. Usando estimación. ({e})")
                     df_temp['Date'] = (fechas_datetime + pd.Timedelta(days=retardo_publicacion)).dt.normalize()
 
             # --- TRANSFORMACIÓN DE FECHAS #2: ALINEACIÓN MENSUAL ---
@@ -483,6 +488,7 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
             tickers_sin_datos.append(ticker)
             continue
 
+    print("\n¡Extracción finalizada!")
     # Concatenación final
     if dfs_lista:
         df_final = pd.concat(dfs_lista, axis=0, ignore_index=True)
@@ -569,8 +575,81 @@ def unir_financials(df_yfinance: pd.DataFrame, df_simfin: pd.DataFrame) -> pd.Da
     if columnas_presentes:
         df_unido = df_unido.dropna(subset=columnas_presentes, how='all')
     
+    # Se eliminan espacios en los nombres de las columnas
+    df_unido.columns = df_unido.columns.str.replace(' ', '')   
 
     return df_unido
+
+
+def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforma variables financieras de flujo a TTM (Trailing Twelve Months) 
+    a partir de los datos financieros trimestrales. 
+    Añade el sufijo '_TTM' y elimina las originales.
+    
+    Args:
+        df (pd.DataFrame): DataFrame original con datos trimestrales.
+        
+    Returns:
+        pd.DataFrame: DataFrame con las columnas TTM calculadas y las originales eliminadas.
+    """
+    # Crear una copia para evitar modificar el DataFrame original por referencia
+    df_ttm = df.copy()
+    
+    # Unir las listas de variables de flujo
+    cols_flujo_raw = cols_resultados + cols_cashflow 
+    cols_flujo = [col.replace(' ', '') for col in cols_flujo_raw]
+    
+    # Filtrar para operar sólo sobre las columnas que realmente existen en el DataFrame
+    cols_presentes = [col for col in cols_flujo if col in df_ttm.columns]
+    
+    # Ordenar por Ticker y Date para que el rolling sea cronológico
+    df_ttm = df_ttm.sort_values(by=['Ticker', 'Date'])
+
+    # Aplica forward fill para evitar huecos si existen datos trimestrales faltantes.
+    # Se limita el arrastre (limit= 2) para no inventar datos si una empresa 
+    # dejó de reportar hace mucho, pero rellenar huecos esporádicos.
+
+    df_ttm[cols_presentes] = df_ttm.groupby('Ticker')[cols_presentes].ffill(limit=2)
+    
+    # CALCULAR TTM: Agrupar por Ticker y aplicar suma/promedio móvil de 4 trimestres
+    for col in cols_presentes:
+        nuevo_nombre = f"{col}_TTM"
+        if col == 'BasicAverageShares': 
+            # Para esta variable corresponde el promedio
+            df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
+                lambda x: x.rolling(window=4, min_periods=1).mean() 
+            )
+        else:
+            # Para el resto se calcula la suma
+            # MAGIA MATEMÁTICA: Promedio móvil * 4 equivale a sumar cuando la ventana es de 4, 
+            # permitiendo anualizar de forma aproximada cuando hay menos de 4 valores en la ventana 
+            # (se evitan NaNs al principio)
+            df_ttm[nuevo_nombre] = df_ttm.groupby('Ticker')[col].transform(
+                lambda x: x.rolling(window=4, min_periods=1).mean() * 4
+            )
+        
+    # 3. LIMPIAR: Descartar las columnas originales de flujo
+    df_ttm = df_ttm.drop(columns=cols_presentes)
+    
+    # Restaurar el orden original del índice por consistencia
+    df_ttm = df_ttm.sort_index()
+    
+    return df_ttm
+
+
+def obtener_cols_financieras(incluirTTM:bool=True)->list:
+    if incluirTTM:
+        cadena = '_TTM'
+    else:
+        cadena = ''
+    
+    cols_cashflow_ttm = [col + cadena for col in cols_cashflow]
+    cols_resultados_ttm = [col + cadena for col in cols_resultados]
+    cols_financieras_raw = cols_balance + cols_cashflow_ttm + cols_resultados_ttm
+    cols_financieras = [col.replace(' ', '') for col in cols_financieras_raw]
+
+    return cols_financieras
 
 
 def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
@@ -593,25 +672,22 @@ def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
     # Resetear el índice
     df_clean = df.reset_index(drop=True)
 
-    #  Extraer los nombres de las columnas financieras de yfinance desde el diccionario
-    cols_financieras = list(mapa_columnas.values()) + ['FinancialsSource']
+    #  Extraer los nombres de las columnas financieras
+    cols_financieras = obtener_cols_financieras(incluirTTM=True) + ['FinancialsSource']
     cols_presentes_fin = [col for col in cols_financieras if col in df_clean.columns]
     
     # Se aplica forward fill a las columnas financieras, para completar datos de granularidad mensual
     # Se tolera una demora máxima de 6 meses en la presentación del siguiente reporte trimestral (limit=6)
     if cols_presentes_fin:
         df_clean[cols_presentes_fin] = df_clean.groupby('Ticker')[cols_presentes_fin].ffill(limit=6)
-
+    
     # Eliminar filas que no tengan datos en las columnas críticas: 
     # precio 'Open' y al menos una métrica financiera clave
-    df_clean = df_clean.dropna(subset=['Close'])
+    df_clean = df_clean.dropna(subset=['Open'])
 
-    metrica_control = [col for col in ['Total Assets', 'Net Income'] if col in df_clean.columns]
+    metrica_control = [col for col in ['TotalAssets', 'NetIncome_TTM'] if col in df_clean.columns]
     if metrica_control:
         df_clean = df_clean.dropna(subset=metrica_control, how='all')
-
-    # Eliminar espacios en los nombres de las columnas
-    df_clean.columns = df_clean.columns.str.replace(' ', '')
 
     return df_clean
 
@@ -639,6 +715,9 @@ def guardar_raw_data(df_final_clean:pd.DataFrame)->pd.DataFrame:
             # Si el fichero no existe, el consolidado son los datos actuales
             df_consolidado = df_datos_nuevos
 
+        # Asegurar que el directorio exista antes de guardar los datos
+        raw_data_file.parent.mkdir(parents=True, exist_ok=True)
+        
         # Guardar el dataframe completo consolidado
         df_consolidado.to_parquet(raw_data_file, index=False)
         
@@ -807,7 +886,7 @@ def main():
         tickers_con_precios_nuevos, 
         aproximar_fechas = False
         )
-    print("Extracción de financials de yfinance finalizada. Dimensiones:", df_yfinance.shape)
+    print("Dimensiones:", df_yfinance.shape)
 
 
     print("\n--- Unión de datasets y almacenamiento ---\n")
@@ -819,10 +898,13 @@ def main():
     df_financials_completo = unir_financials(df_yfinance, df_simfin_new_data)  
     print("Unidos datasets de financials. Dimensiones:", df_financials_completo.shape)
 
+    # Convertir variables de flujo a TTM
+    df_financials_ttm = transformar_flujos_a_ttm(df_financials_completo)
+
     # Unir precios con datos financieros
     df_merged = pd.merge(
         df_prices, 
-        df_financials_completo, 
+        df_financials_ttm, 
         on=['Date', 'Ticker'],
         how='left' 
     )

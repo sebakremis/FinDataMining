@@ -3,7 +3,11 @@ from pathlib import Path
 
 # Establecer ubicación de datos
 data_folder = "data"
-raw_data_file = Path(data_folder) / "raw_data.parquet"
+
+raw_data_file = Path(data_folder) / "raw" / "raw_data.parquet"
+clean_data_file = Path(data_folder) / "clean" / "clean_data.parquet"
+
+market_index_file = Path(data_folder) / "market_index.parquet"
 ruta_sin_datos = Path(data_folder) / "tickers_sin_datos.csv"
 
 # Definir periodo de extracción e intervalo de precios

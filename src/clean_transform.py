@@ -29,10 +29,10 @@ def corregir_anomalias(df:pd.DataFrame)->pd.DataFrame:
     clean_df.loc[condicion_1, columnas_1] /= 1000
 
     # Caso 2:  TotalRevenue negativo
-    condicion_2 = clean_df['TotalRevenue'] < 0
+    condicion_2 = clean_df['TotalRevenue_TTM'] < 0
 
     # Se asignan a NaN
-    clean_df['TotalRevenue'] = np.where(condicion_2, np.nan, clean_df['TotalRevenue']) 
+    clean_df['TotalRevenue_TTM'] = np.where(condicion_2, np.nan, clean_df['TotalRevenue_TTM']) 
 
     # Caso 3:  Deuda negativa
     condicion_3_current_debt = (clean_df['CurrentDebt'] < 0)
@@ -43,16 +43,16 @@ def corregir_anomalias(df:pd.DataFrame)->pd.DataFrame:
     clean_df['LongTermDebt'] = np.where(condicion_3_longterm_debt, np.nan, clean_df['LongTermDebt'])
 
     # Caso 4:  Depreciación y Amortización negativa de yfinance
-    condicion_4 = (clean_df['DepreciationAndAmortization'] < 0) & (clean_df['FinancialsSource']=='yfinance')
+    condicion_4 = (clean_df['DepreciationAndAmortization_TTM'] < 0) & (clean_df['FinancialsSource']=='yfinance')
 
     # Se asignan a NaN
-    clean_df.loc[condicion_4,'DepreciationAndAmortization'] = np.nan
+    clean_df.loc[condicion_4,'DepreciationAndAmortization_TTM'] = np.nan
 
     # Caso 5: Depreciación y Amortización negativa de simFin
-    condicion_5 = (clean_df['DepreciationAndAmortization'] < 0) & (clean_df['FinancialsSource']=='simFin')
+    condicion_5 = (clean_df['DepreciationAndAmortization_TTM'] < 0) & (clean_df['FinancialsSource']=='simFin')
 
     # Se convierten a positivos
-    clean_df.loc[condicion_5, 'DepreciationAndAmortization'] = clean_df.loc[condicion_5, 'DepreciationAndAmortization'].abs()
+    clean_df.loc[condicion_5, 'DepreciationAndAmortization_TTM'] = clean_df.loc[condicion_5, 'DepreciationAndAmortization_TTM'].abs()
 
     return clean_df
 
