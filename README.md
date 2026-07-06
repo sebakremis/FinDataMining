@@ -19,7 +19,7 @@ El objetivo es proporcionar un entorno de experimentación ágil para científic
 
 <div align="center">
 
-  <h3>Ejemplo de predicciones</h3>
+  <h3>Ejemplo de predicciones: Revenue Yield</h3>
 
   <img src="docs/images/ej_predicciones_RevenueYield.png" alt="Ejemplo de predicciones de RevenueYield" width="90%">
 
