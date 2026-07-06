@@ -21,12 +21,12 @@ El objetivo es proporcionar un entorno de experimentación ágil para científic
 
   <h3>Ejemplo de predicciones</h3>
 
-  <img src="docs/images/ejemplo_predicciones.png" alt="Ejemplo de predicciones" width="90%">
+  <img src="docs/images/ej_predicciones_RevenueYield.png" alt="Ejemplo de predicciones de RevenueYield" width="90%">
 
   <br><br>
   <h3>Ejemplo de explicabilidad con Shap</h3>
 
-  <img src="docs/images/ejemplo_shap_wdc.png" alt="Ejemplo de Shap" width="90%"> 
+  <img src="docs/images/ej_shap_RevenueYield_JBL.png" alt="Ejemplo de Shap" width="90%"> 
 
 </div>
 
@@ -86,7 +86,7 @@ FINDATAMINING/
 Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** La fase de modelado permite seleccionar y experimentar con distintas variables objetivo, tales como la Capitalización Bursátil o alguno de los ratios de valuación que se incluyen en el dataset.
+* **Variable objetivo (Target):** La fase de modelado permite experimentar utilizando como variables objetivo distintos ratios de valuación, seleccionados por su robustez para ser utilizados en ML, tales como `RevenueYield`, `AssetToMarket`, etc.
 
 ---
 ## 🚀 Requisitos e Instalación

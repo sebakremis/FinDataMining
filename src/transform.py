@@ -305,17 +305,14 @@ def imputar_numericas(df: pd.DataFrame) -> pd.DataFrame:
     # Función auxiliar que se aplicará a cada Ticker
     def procesar_grupo(serie):
         sesgo = serie.skew()
-        
-        # Si hay muy pocos datos, skew() devuelve NaN. Se aplica forward fill
-        if pd.isna(sesgo):
-            return serie.ffill()
-            
-        # Se separa según el valor absoluto del umbral
-        if abs(sesgo) < umbral:
+                    
+        # Se separa según el valor absoluto del umbral.
+        # pd.notna(sesgo) evita un warning de Pandas al intentar comparar NaN < 3
+        if pd.notna(sesgo) and abs(sesgo) < umbral:
             # Simétricas: Media móvil (mean)
             rolling_vals = serie.rolling(window=4, min_periods=1).mean()
         else:
-            # Asimétricas: Mediana móvil (median)
+            # Asimétricas (o NaN por falta de datos): Mediana móvil (median)
             rolling_vals = serie.rolling(window=4, min_periods=1).median()
             
         return serie.fillna(rolling_vals)
@@ -442,7 +439,9 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     # --- RATIOS DE VALUACIÓN (Optimizados para ML: Yields) ---
     df_metrics['EarningsYield'] = df_metrics['NetIncome_TTM'] / df_metrics['MarketCap']
     df_metrics['EbitdaYield'] = df_metrics['EBITDA_TTM'] / df_metrics['EnterpriseValue']
+    df_metrics['RevenueYield'] = df_metrics['TotalRevenue_TTM'] / df_metrics['EnterpriseValue']
     df_metrics['BookToMarket'] = df_metrics['StockholdersEquity'] / df_metrics['MarketCap']
+    df_metrics['AssetToMarket'] = df_metrics['TotalAssets'] / df_metrics['MarketCap']
 
     # --- RATIOS DE RENTABILIDAD Y MÁRGENES ---
     df_metrics['OperatingMargins'] = df_metrics['OperatingIncome_TTM'] / df_metrics['TotalRevenue_TTM']
@@ -472,12 +471,11 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
     
     # Reemplazar por NaN todos los infinitos generados por divisiones por cero
     df_metrics.replace([np.inf, -np.inf], np.nan, inplace=True)
-
-    # --- MANEJO DE VALORES EXTREMOS / INVÁLIDOS ---
+    
     # Manejo de valores inválidos: NaN en DebtToEquity si el patrimonio es negativo:
     mask_patrimonio_invalido = df_metrics['StockholdersEquity'] <= 0
     df_metrics.loc[mask_patrimonio_invalido, 'DebtToEquity'] = np.nan
-
+  
     # --- LIMPIEZA FINAL: REDONDEAR COLUMNAS ---
     cols_a_redondear = [
         'EarningsYield', 'BookToMarket', 'EbitdaYield', 'OperatingMargins', 
@@ -546,7 +544,7 @@ def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana:
     """
     Calcula retornos y el ShortTermBeta del activo respecto al mercado.
     Aplica un rezago (lag) de 1 periodo para evitar Data Leakage.
-    Incluye un flag 'ReturnIsMissing' para registrar imputaciones.
+    Incluye un flag 'Return_IsMissing' para registrar imputaciones.
     """       
     ticker_mercado = df_index['Ticker'].iloc[0]
     
@@ -581,7 +579,7 @@ def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana:
         id_vars='Date', var_name='Ticker', value_name='ShortTermBeta'
     )
     df_missing_long = df_missing_lag.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='ReturnIsMissing_Lag1'
+        id_vars='Date', var_name='Ticker', value_name='Return_IsMissing_Lag1'
     )
     
     # Consolidar todas las features en un solo DataFrame
@@ -668,6 +666,10 @@ def plot(col):
         cat_plot(col).show()
 
 
+def mostrar_asimetrias(df:pd.DataFrame):
+    print(df.select_dtypes(include="number").skew().sort_values(ascending=False).to_string())
+
+
 # --- Funciones de Transformación
 
 def transformar_yeo_johnson(df: pd.DataFrame, cols: list) -> pd.DataFrame:
@@ -678,10 +680,11 @@ def transformar_yeo_johnson(df: pd.DataFrame, cols: list) -> pd.DataFrame:
 
     # Se aplica la función y elimina la columna original
     for col in cols:
-        df_out[f'{col}_YeoTransformed'] = pt.fit_transform(df_out[[col]])
+        df_out[f'{col}_Yeo'] = pt.fit_transform(df_out[[col]])
         df_out.drop(col, axis=1, inplace=True)
         
     return df_out
+
 
 def transformar_log(df: pd.DataFrame, cols: list, calculo_1p: bool = False) -> pd.DataFrame:
     # Creamos una copia para no alterar el DataFrame original accidentalmente
@@ -704,6 +707,18 @@ def transformar_log(df: pd.DataFrame, cols: list, calculo_1p: bool = False) -> p
 
 
 # --- Tratamiento de Outliers ---
+
+def aplicar_clip(df:pd.DataFrame, cols:list[str], limite:float)->pd.DataFrame:
+    df_clipped = df.copy()
+    if limite > 0:
+        # Límite positivo: actúa como un techo
+        df_clipped[cols] = df_clipped[cols].clip(upper=limite)
+    else:
+        # Límite negativo/cero: actúa como un piso
+        df_clipped[cols] = df_clipped[cols].clip(lower=limite)
+    
+    return df_clipped
+
 
 def gestiona_outliers(col,clas = 'check'):
      """
@@ -731,7 +746,7 @@ def gestiona_outliers(col,clas = 'check'):
      if clas == 'check':
             return(lower*100,upper*100,(lower+upper)*100)
      elif clas == 'winsor':
-            return(winsorize_with_pandas(col,(lower,upper)))
+            return(soft_winsorize(col,(lower,upper)))
      elif clas == 'miss':
             print('\n MissingAntes: ' + str(col.isna().sum()))
             col.loc[criterio1&criterio2] = np.nan
@@ -745,6 +760,26 @@ def winsorize_with_pandas(s, limits):
     """
     return s.clip(lower=s.quantile(limits[0], interpolation='lower'), 
                   upper=s.quantile(1-limits[1], interpolation='higher'))
+
+
+def soft_winsorize(s, limits):
+    """
+    Aplica compresión asintótica a los outliers en lugar de un corte duro.
+    """
+    q_lower = s.quantile(limits[0], interpolation='lower')
+    q_upper = s.quantile(1-limits[1], interpolation='higher')
+    
+    s_mod = s.copy()
+    
+    # Comprimir cola superior suavemente
+    mask_upper = s > q_upper
+    s_mod.loc[mask_upper] = q_upper + np.log1p(s.loc[mask_upper] - q_upper)
+    
+    # Comprimir cola inferior suavemente
+    mask_lower = s < q_lower
+    s_mod.loc[mask_lower] = q_lower - np.log1p(q_lower - s.loc[mask_lower])
+    
+    return s_mod
 
 
 # --- Bloque principal ---

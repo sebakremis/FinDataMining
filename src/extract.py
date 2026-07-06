@@ -15,9 +15,10 @@ import random
 from src.data_sources import simfin_api_key
 from src.config import (
     periodo, intervalo, cols_resultados, cols_balance,
-    cols_cashflow, data_folder, mapa_columnas,
+    cols_cashflow, simfin_data_folder, mapa_columnas,
     retardo_publicacion, cambios_tickers,
-    ruta_sin_datos, raw_data_file
+    ruta_sin_datos, raw_data_file,
+    market_index_file, constituents_file
 )
 
 def clean_ticker(s):
@@ -40,7 +41,9 @@ def extraer_simfin() -> pd.DataFrame:
     Descarga todos los datos de simFin, sin filtrar tickers.
     """
     sf.set_api_key(simfin_api_key)
-    sf.set_data_dir(f'{data_folder}/simfin')
+    sf.set_data_dir(simfin_data_folder)
+    simfin_data_folder.mkdir(parents=True, exist_ok=True)
+
 
     # Identificar columnas de metadatos compartidas
     metadatos_comunes = [
@@ -310,19 +313,18 @@ def descargar_constituents_sp(force_update=False):
     """
     Descarga el listado de componentes del S&P 500 si no existe o si se fuerza la actualización.
     """
-    file_path = f"{data_folder}/constituents.csv"
     url_raw = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
     
-    os.makedirs(data_folder, exist_ok=True)
+    constituents_file.parent.mkdir(parents=True, exist_ok=True)
     
-    if not os.path.exists(file_path) or force_update:
+    if not constituents_file.exists() or force_update:
         print("Descargando constituents.csv desde GitHub...")
-        urllib.request.urlretrieve(url_raw, file_path)
+        urllib.request.urlretrieve(url_raw, constituents_file)
         print("Descarga completada.")
     else:
         print("Usando archivo constituents.csv local.")
         
-    return file_path
+    return constituents_file
 
 
 def limpiar_constituents_sp(df:pd.DataFrame)->pd.DataFrame:
@@ -848,7 +850,11 @@ def main():
 
     # Se extrae precio del Índice de Mercado para usar en cálculos y se guarda en fichero 
     df_index, _ = extraer_precios(['SPY'])
-    df_index.to_parquet(f"{data_folder}/market_index.parquet")
+
+    # Asegurar que el directorio exista antes de guardar los datos
+    market_index_file.parent.mkdir(parents=True, exist_ok=True)
+
+    df_index.to_parquet(market_index_file)
 
     # Se guardan los tickers que obtuvieron precios para filtrar al extraer info y financials de yfinance
     tickers_con_precios_nuevos = df_prices['Ticker'].unique().tolist()

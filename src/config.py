@@ -2,11 +2,22 @@
 from pathlib import Path
 
 # Establecer ubicación de datos
+
+# Carpeta principal
 data_folder = "data"
 
+# Carpeta para datos crudos gestionados por la API de simFin
+simfin_data_folder = Path(data_folder) / "raw" / "simfin" 
+
+# Carpeta para guardar reportes del modelado
+reports_folder = Path(data_folder) / "reports"
+
+# Ficheros raw y clean
 raw_data_file = Path(data_folder) / "raw" / "raw_data.parquet"
 clean_data_file = Path(data_folder) / "clean" / "clean_data.parquet"
 
+# Ficheros complementarios
+constituents_file = Path(data_folder) / "constituents.csv"
 market_index_file = Path(data_folder) / "market_index.parquet"
 ruta_sin_datos = Path(data_folder) / "tickers_sin_datos.csv"
 
