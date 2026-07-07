@@ -8,22 +8,6 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import plotly.express as px
 
 
-def obtener_metricas(y_real, y_pred, nombre_modelo):
-    """
-    Calcula métricas de evaluación para modelos de regresión.
-    """
-    mse = mean_squared_error(y_real, y_pred)
-    
-    
-    return {
-        'Modelo': nombre_modelo,
-        'MAE': mean_absolute_error(y_real, y_pred),
-        'MSE': mse,
-        'RMSE': np.sqrt(mse),
-        'R2': r2_score(y_real, y_pred)
-    }
-
-
 def split_ultimo(
     df: pd.DataFrame, 
     label: str, 
@@ -44,6 +28,24 @@ def split_ultimo(
     y_test = df_test[label]
     
     return X_train, X_test, y_train, y_test
+
+
+# Funciones "legacy": ya no se utilizan en el modelado por clasificación
+
+def obtener_metricas(y_real, y_pred, nombre_modelo):
+    """
+    Calcula métricas de evaluación para modelos de regresión.
+    """
+    mse = mean_squared_error(y_real, y_pred)
+    
+    
+    return {
+        'Modelo': nombre_modelo,
+        'MAE': mean_absolute_error(y_real, y_pred),
+        'MSE': mse,
+        'RMSE': np.sqrt(mse),
+        'R2': r2_score(y_real, y_pred)
+    }
 
 
 def procesar_resultados_prediccion(y_test, y_pred, tickers):

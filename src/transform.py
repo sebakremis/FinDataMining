@@ -671,25 +671,6 @@ def categorizar_en_cuantiles(df: pd.DataFrame, columna: str, num_cuantiles: int 
     return df_out
 
 
-def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
-    # Limpiar anomalías: forzamos que el piso de ingresos y activos sea 0
-    revenue_clean = df['TotalRevenue_TTM'].clip(lower=0)
-    assets_clean = df['TotalAssets'].clip(lower=0)
-
-    # Agrupar y calcular la suma total del mercado por fecha usando los datos limpios
-    df['TotalMarketAssets'] = assets_clean.groupby(df['Date']).transform('sum')
-    df['TotalMarketRevenue'] = revenue_clean.groupby(df['Date']).transform('sum')
-    
-    # Dividir los valores individuales por el total del mercado
-    df['RelativeAssets'] = assets_clean / df['TotalMarketAssets']
-    df['RelativeRevenue'] = revenue_clean / df['TotalMarketRevenue']
-
-    # Se eliminan las columnas de totales
-    df.drop(columns=['TotalMarketAssets', 'TotalMarketRevenue'], inplace=True)
-   
-    return df
-
-
 # --- Funciones de Análisis Exploratorio de Datos ---
 
 def histogram_boxplot(data, xlabel = None, title = None, font_scale=2, figsize=(9,8), bins = None):
@@ -722,7 +703,7 @@ def histogram_boxplot(data, xlabel = None, title = None, font_scale=2, figsize=(
     plt.show()
 
 
-def cat_plot(col):
+def graficar_cat(col):
      """
      Gráfico de barras para variables categóricas.
      """
@@ -732,7 +713,7 @@ def cat_plot(col):
         return(fig)
 
 
-def plot(col):
+def graficar(col):
      """
      Función general para aplicar al archivo por columnas, detectando el tipo de variable y aplicando el gráfico adecuado.
      """
@@ -741,7 +722,7 @@ def plot(col):
         histogram_boxplot(col, xlabel = col.name, title = 'Distibución continua')
      else:
         print('Cat')
-        cat_plot(col).show()
+        graficar_cat(col).show()
 
 
 def mostrar_asimetrias(df:pd.DataFrame):
@@ -947,9 +928,6 @@ def main():
 
     df_with_features = calcular_retornos_y_betas(df_with_features, df_index)  
 
-    # Calcular tamaños relativos: RelativeAssets y RelativeRevenue
-    df_with_features = calcular_relative_size(df_with_features)
-
     print("Feature Engineering finalizado.")
 
 
@@ -968,55 +946,92 @@ def main():
     # --- Transformaciones ---  
 
     # Transformaciones logarítmicas
-    columnas_a_transformar = [ 
-        'CapExToRevenue',
+    columnas_log = [ 
         'DebtToEquity',
-        'QuarterlyVariance_Lag1',
-        'MarketCap',
-        'EnterpriseValue'
+        'CurrentRatio',
+        'MarketCap' 
         ]
 
     df_transformed = transformar_log(
         df_imputed, 
-        columnas_a_transformar, 
+        columnas_log, 
         calculo_1p=True
         )
-    
+   
+    # Transformaciones Yeo-Johnson
+    columnas_yeo = [ 
+        'MonthlyReturn_Lag1',
+        'TotalRevenue_TTM_QoQ',
+        'FcfToEbitda',
+        'NetDebtToEbitda',
+        'TotalRevenue_TTM_YoY',
+        'AverageDailyVolume_Lag1_QoQ',
+        'AverageDailyVolume_Lag1_YoY',
+        'EBITDA_TTM_QoQ',
+        'EBITDA_TTM_YoY',
+        'ShortTermBeta',
+        'OperatingMargins', 
+        'ProfitMargins', 
+        'ReturnOnAssets', 
+        'ReturnOnEquity',
+        'BookToMarket',
+        'EnterpriseValue'    
+        ]
+
+    df_transformed = transformar_yeo_johnson(
+        df_transformed, 
+        columnas_yeo
+        )
+
+    # Agrupar por cuantiles
+    cols_a_agrupar = [
+        'MonthlyExcessReturn'       
+    ]
+
+    # Aplicar la categorización
+    for col in cols_a_agrupar:
+        df_transformed = categorizar_en_cuantiles(df_transformed, columna=col, num_cuantiles=5)
+
     print("Transformaciones finalizadas.")
 
-
     # --- Tratamiento de Outliers ---
+
+    # Recortar valores extremos
+    # Columnas a recortar:
+    cols_clip = ['EbitdaYield', 'EarningsYield', 'CapExToRevenue', 'TotalRevenue_TTM_Acceleration'] 
+
+    df_clipped = aplicar_clip(df_transformed, cols=cols_clip, limite = -2.0)
+    df_clipped = aplicar_clip(df_clipped, cols=cols_clip, limite = 2.0)
 
     # Definir columnas que saltean la "winsorización"
     cols_fin_clean = obtener_cols_financieras(incluirTTM=True)
 
-    columnas_intactas = cols_fin_clean + [
-        # Variables de precio y ratios
-        'Close',
-        'Open',    
-        'TrailingPE',
-        'EnterpriseToEbitda',
-        'PriceToBook',
-        # Otras
+    # Columnas flag
+    cols_flag = df_clipped.columns[df_clipped.columns.str.contains('_IsMissing')].tolist()
+
+    columnas_intactas = cols_fin_clean + cols_flag + [
         'Date', 
-        'Ticker'     
+        'Ticker',
+        'Close',
+        'Open',
+        'AverageDailyVolume_Lag1'
         ]
 
     # Separar el dataset
-    df_passthrough = df_transformed[columnas_intactas].copy()
-    df_transformed_features = df_transformed.drop(columns=columnas_intactas)
+    df_passthrough = df_clipped[columnas_intactas].copy()
+    df_clipped_features = df_clipped.drop(columns=columnas_intactas)
 
-    df_cont_transformed = df_transformed_features.select_dtypes(include="number")
-    df_winsor = df_cont_transformed.apply(lambda x: gestiona_outliers(x, clas='winsor'))
+    df_cont_clipped = df_clipped_features.select_dtypes(include="number")
+    df_winsor = df_cont_clipped.apply(lambda x: gestiona_outliers(x, clas='winsor'))
 
     print("Gestión de outliers finalizada.")
 
 
     # --- Concatenación final y almacenamiento ---
 
-    df_non_numeric_transformed = df_transformed_features.select_dtypes(exclude='number')
+    df_non_numeric_clipped = df_clipped_features.select_dtypes(exclude='number')
     # Se unen variables contínuas transformadas y variables no numéricas
-    df_combined = pd.concat([df_non_numeric_transformed, df_winsor], axis=1)
+    df_combined = pd.concat([df_non_numeric_clipped, df_winsor], axis=1)
    
     # Unir con las columnas que fueron salteadas
     df_final = pd.concat([df_passthrough, df_combined], axis=1)
@@ -1027,7 +1042,7 @@ def main():
 
     # Guardar el dataframe
     df_final.to_parquet(clean_data_file)
-    print(f"Transformación finalizada.\nFichero 'clean_data.parquet' guardado en la carpeta de datos.")
+    print(f"Fase de Transformación finalizada.\nFichero 'clean_data.parquet' guardado en la carpeta de datos.")
     print("Dimensión de datos finales:", df_final.shape)
 
 if __name__ == "__main__":
