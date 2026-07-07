@@ -15,6 +15,17 @@ Cuenta con tres fases:
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste bajas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
 
 ---
+## 📊 Screenshots
+
+<div align="center">
+
+  <h3>Ejemplo de explicabilidad con Shap</h3>
+
+  <img src="docs/images/ej_shap.png" alt="Ejemplo de Shap" width="90%"> 
+
+</div>
+
+---
 ## 🗄️ Fuentes de Datos
 
 El pipeline de extracción obtiene datos históricos de precios de mercado y los balances corporativos disponibles de forma libre y gratuita, a través de las librerías: 
