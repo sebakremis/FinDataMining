@@ -9,26 +9,10 @@ Este proyecto implementa un pipeline ETL (Extracción, Transformación y Carga) 
 
 Cuenta con tres fases:
 * *Extracción*: obtención de datos a través de APIs. Permite actualizar datos, reduciendo los tiempos de ejecución al repetir el flujo de extracción.
-* *Transformación*: limpieza de errores, imputación de valores perdidos, transformaciones y gestión de outliers.
-* *Modelado*: feature engineering, aplicación de modelo *RandomForest* con datos completos, prueba de validación cruzada con partición de series temporales, evaluación de resultados, exportación de datos y predicciones, explicabilidad del modelo y optimización de hiper-parámetros.
+* *Transformación*: limpieza de errores, feature engineering, imputación de valores perdidos, transformaciones y gestión de outliers.
+* *Modelado*: aplicación de modelo  clasificador *RandomForest* con datos completos, prueba de validación cruzada con partición de series temporales, evaluación de resultados, exportación de datos y predicciones, explicabilidad del modelo y optimización de hiper-parámetros.
 
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste bajas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
-
----
-## 📊 Screenshots
-
-<div align="center">
-
-  <h3>Ejemplo de predicciones: Revenue Yield</h3>
-
-  <img src="docs/images/ej_predicciones_RevenueYield.png" alt="Ejemplo de predicciones de RevenueYield" width="90%">
-
-  <br><br>
-  <h3>Ejemplo de explicabilidad con Shap</h3>
-
-  <img src="docs/images/ej_shap_RevenueYield_JBL.png" alt="Ejemplo de Shap" width="90%"> 
-
-</div>
 
 ---
 ## 🗄️ Fuentes de Datos
@@ -86,7 +70,7 @@ FINDATAMINING/
 Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** La fase de modelado permite experimentar utilizando como variables objetivo distintos ratios de valuación, seleccionados por su robustez para ser utilizados en ML, tales como `RevenueYield`, `AssetToMarket`, etc.
+* **Variable objetivo (Target):** Variable categórica `MonthlyExcessReturn_Quantile`, la cual agrupa en 5 clusters los retornos mensuales en exceso al retorno de mercado.
 
 ---
 ## 🚀 Requisitos e Instalación
