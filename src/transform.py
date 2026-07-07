@@ -540,40 +540,65 @@ def calcular_lag(df:pd.DataFrame, cols:list,months:int=1)->pd.DataFrame:
     return df
 
 
+import pandas as pd
+
+import pandas as pd
+
 def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = 6) -> pd.DataFrame:
     """
-    Calcula retornos y el ShortTermBeta del activo respecto al mercado.
-    Aplica un rezago (lag) de 1 periodo para evitar Data Leakage.
+    Calcula retornos (basados en Open) y ShortTermBeta rezagados 1 periodo (Features).
+    Calcula además el MonthlyExcessReturn intra-mes (Close vs Open) alineado en t=0 (Target/Label base).
     Incluye un flag 'Return_IsMissing' para registrar imputaciones.
     """       
     ticker_mercado = df_index['Ticker'].iloc[0]
     
-    # Preparar datos y calcular retornos
+    # Preparar datos uniendo panel e índice
     df_unido = pd.concat([df, df_index], ignore_index=True)
-    df_pivot = df_unido.pivot(index='Date', columns='Ticker', values='Open').sort_index()
     
+    # Pivotar para aislar Open y Close
+    df_open = df_unido.pivot(index='Date', columns='Ticker', values='Open').sort_index()
+    df_close = df_unido.pivot(index='Date', columns='Ticker', values='Close').sort_index()
+    
+    # ==========================================
+    # BLOQUE 1: FEATURES (Usa Open a Open)
+    # ==========================================
     # Calcular retornos en bruto, extraer flag y luego imputar
-    df_retornos_raw = df_pivot.pct_change(fill_method=None)
+    df_retornos_raw = df_open.pct_change(fill_method=None)
     df_return_is_missing = df_retornos_raw.isna().astype(int)
-    df_retornos = df_retornos_raw.fillna(0)
+    df_retornos_open = df_retornos_raw.fillna(0)
     
-    retornos_mercado = df_retornos[ticker_mercado]
-    df_activos = df_retornos.drop(columns=[ticker_mercado])
-    df_missing_activos = df_return_is_missing.drop(columns=[ticker_mercado]) # Extraer flag del mercado
+    retornos_mercado_open = df_retornos_open[ticker_mercado]
+    df_activos_open = df_retornos_open.drop(columns=[ticker_mercado])
+    df_missing_activos = df_return_is_missing.drop(columns=[ticker_mercado])
     
-    # Calcular estadísticas móviles
-    varianza_mercado = retornos_mercado.rolling(window=ventana, min_periods=min_periodos).var()
-    covarianzas = df_activos.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado)
+    # Calcular estadísticas móviles para las features
+    varianza_mercado = retornos_mercado_open.rolling(window=ventana, min_periods=min_periodos).var()
+    covarianzas = df_activos_open.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado_open)
     df_betas = covarianzas.div(varianza_mercado, axis=0)
     
-    # Aplicar lag de 1 periodo a todas las features, incluyendo el flag
-    df_activos_lag = df_activos.shift(1)
+    # Aplicar lag de 1 periodo a todas las features (Evitar Data Leakage)
+    df_activos_lag = df_activos_open.shift(1)
     df_betas_lag = df_betas.shift(1)
     df_missing_lag = df_missing_activos.shift(1) 
     
-    # Transformar cada matriz a formato largo (melt)
+    # ==========================================
+    # BLOQUE 2: TARGET/LABEL BASE (Usa Close vs Open intra-mes)
+    # ==========================================
+    # Retorno intra-mes: (Close / Open) - 1
+    df_retornos_intra = (df_close / df_open) - 1
+    
+    retornos_mercado_intra = df_retornos_intra[ticker_mercado]
+    df_activos_intra = df_retornos_intra.drop(columns=[ticker_mercado])
+    
+    # Exceso de retorno intra-mes (Activo - Mercado), SIN LAG
+    df_exceso = df_activos_intra.sub(retornos_mercado_intra, axis=0)
+    
+    # ==========================================
+    # BLOQUE 3: CONSOLIDACIÓN (Melt y Merge)
+    # ==========================================
+    # Transformar features a formato largo
     df_ret_long = df_activos_lag.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='QuarterlyReturn_Lag1'
+        id_vars='Date', var_name='Ticker', value_name='MonthlyReturn_Lag1'
     )
     df_beta_long = df_betas_lag.reset_index().melt(
         id_vars='Date', var_name='Ticker', value_name='ShortTermBeta'
@@ -582,15 +607,68 @@ def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana:
         id_vars='Date', var_name='Ticker', value_name='Return_IsMissing_Lag1'
     )
     
-    # Consolidar todas las features en un solo DataFrame
-    df_features = (df_ret_long
-                   .merge(df_beta_long, on=['Date', 'Ticker'])
-                   .merge(df_missing_long, on=['Date', 'Ticker']))
+    # Transformar target base a formato largo
+    df_exceso_long = df_exceso.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MonthlyExcessReturn'
+    )
     
-    # Unir las features con el DataFrame original
-    df_final = pd.merge(df, df_features, on=['Date', 'Ticker'], how='left')
+    # Consolidar todo en un solo DataFrame temporal
+    df_features_and_target = (df_ret_long
+                   .merge(df_beta_long, on=['Date', 'Ticker'])
+                   .merge(df_missing_long, on=['Date', 'Ticker'])
+                   .merge(df_exceso_long, on=['Date', 'Ticker']))
+    
+    # Unir con el DataFrame original
+    df_final = pd.merge(df, df_features_and_target, on=['Date', 'Ticker'], how='left')
     
     return df_final
+
+
+def categorizar_en_cuantiles(df: pd.DataFrame, columna: str, num_cuantiles: int = 5) -> pd.DataFrame:
+    """
+    Transforma una columna continua en cuantiles cross-sectional (agrupando por 'Date').
+    Convierte el resultado a tipo 'category' de Pandas y elimina la columna continua original.
+    
+    Parámetros:
+    - df: DataFrame con los datos en formato panel (debe contener la columna 'Date').
+    - columna: Nombre de la columna continua a transformar.
+    - num_cuantiles: Cantidad de cuantiles (por defecto 5 para quintiles).
+    
+    Retorna:
+    - Un nuevo DataFrame con la columna categórica añadida y la original eliminada.
+    """
+    # Trabajar sobre una copia para evitar el warning 'SettingWithCopy' o modificar el df original
+    df_out = df.copy()
+    
+    # Definir el nombre de la nueva columna dinámicamente
+    nueva_columna = f"{columna}_Quantile"
+    
+    # Función interna para manejar NaNs y fechas con pocos datos de forma segura
+    def safe_qcut(group):
+        valid_data = group.dropna()
+        # Si no hay suficientes activos en ese mes para armar los cuantiles, devolver NaN
+        if len(valid_data) < num_cuantiles:
+            return pd.Series(np.nan, index=group.index)
+        try:
+            # labels=False devuelve de 0 a N-1. Sumamos 1 para que el rango sea de 1 a N.
+            quintiles = pd.qcut(valid_data, q=num_cuantiles, labels=False, duplicates='drop') + 1
+            return quintiles.reindex(group.index)
+        except ValueError:
+            return pd.Series(np.nan, index=group.index)
+            
+    # Aplicar la categorización cross-sectional (mes a mes)
+    df_out[nueva_columna] = (
+        df_out.groupby('Date')[columna]
+        .transform(safe_qcut)
+    )
+    
+    # Convertir explícitamente el tipo de dato a 'category'
+    df_out[nueva_columna] = df_out[nueva_columna].astype('category')
+    
+    # Eliminar la columna original
+    df_out = df_out.drop(columns=[columna])
+    
+    return df_out
 
 
 def calcular_relative_size(df: pd.DataFrame) -> pd.DataFrame:
