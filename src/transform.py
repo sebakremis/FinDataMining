@@ -767,14 +767,14 @@ def transformar_log(df: pd.DataFrame, cols: list, calculo_1p: bool = False) -> p
 
 # --- Tratamiento de Outliers ---
 
-def aplicar_clip(df:pd.DataFrame, cols:list[str], limite:float)->pd.DataFrame:
+def aplicar_clipping(df:pd.DataFrame, columna:str, limite:float)->pd.DataFrame:
     df_clipped = df.copy()
     if limite > 0:
         # Límite positivo: actúa como un techo
-        df_clipped[cols] = df_clipped[cols].clip(upper=limite)
+        df_clipped[columna] = df_clipped[columna].clip(upper=limite)
     else:
         # Límite negativo/cero: actúa como un piso
-        df_clipped[cols] = df_clipped[cols].clip(lower=limite)
+        df_clipped[columna] = df_clipped[columna].clip(lower=limite)
     
     return df_clipped
 
@@ -839,6 +839,9 @@ def soft_winsorize(s, limits):
     s_mod.loc[mask_lower] = q_lower - np.log1p(q_lower - s.loc[mask_lower])
     
     return s_mod
+
+def obtener_cols_flag(df:pd.DataFrame)->list[str]:
+    return df.columns[df.columns.str.contains('_IsMissing')].tolist()
 
 
 # --- Bloque principal ---
@@ -943,7 +946,7 @@ def main():
     print("Tratamiento de Missings finalizado.")
 
 
-    # --- Transformaciones ---  
+    # --- Transformaciones Iniciales ---  
 
     # Transformaciones logarítmicas
     columnas_log = [ 
@@ -963,18 +966,15 @@ def main():
         'MonthlyReturn_Lag1',
         'TotalRevenue_TTM_QoQ',
         'FcfToEbitda',
-        'NetDebtToEbitda',
         'TotalRevenue_TTM_YoY',
         'AverageDailyVolume_Lag1_QoQ',
         'AverageDailyVolume_Lag1_YoY',
         'EBITDA_TTM_QoQ',
         'EBITDA_TTM_YoY',
-        'ShortTermBeta',
         'OperatingMargins', 
         'ProfitMargins', 
         'ReturnOnAssets', 
         'ReturnOnEquity',
-        'BookToMarket',
         'EnterpriseValue'    
         ]
 
@@ -992,22 +992,30 @@ def main():
     for col in cols_a_agrupar:
         df_transformed = categorizar_en_cuantiles(df_transformed, columna=col, num_cuantiles=5)
 
-    print("Transformaciones finalizadas.")
+    print("Transformaciones iniciales finalizadas.")
 
-    # --- Tratamiento de Outliers ---
+
+    # --- Tratamiento Inicial de Outliers ---
 
     # Recortar valores extremos
     # Columnas a recortar:
-    cols_clip = ['EbitdaYield', 'EarningsYield', 'CapExToRevenue', 'TotalRevenue_TTM_Acceleration'] 
-
-    df_clipped = aplicar_clip(df_transformed, cols=cols_clip, limite = -2.0)
-    df_clipped = aplicar_clip(df_clipped, cols=cols_clip, limite = 2.0)
+    tuplas_clipping = [
+        ('EbitdaYield', -2.0),
+        ('EbitdaYield', 2.0),
+        ('EarningsYield', -2.0),
+        ('EarningsYield', 2.0),          
+        ('TotalRevenue_TTM_Acceleration', -2.0),
+        ('TotalRevenue_TTM_Acceleration', 2.0),
+        ('CapExToRevenue', 1.0)
+        ] 
+    for col, limit in tuplas_clipping:
+        df_transformed = aplicar_clipping(df_transformed, columna=col, limite = limit)
 
     # Definir columnas que saltean la "winsorización"
     cols_fin_clean = obtener_cols_financieras(incluirTTM=True)
 
     # Columnas flag
-    cols_flag = df_clipped.columns[df_clipped.columns.str.contains('_IsMissing')].tolist()
+    cols_flag = obtener_cols_flag(df_transformed)
 
     columnas_intactas = cols_fin_clean + cols_flag + [
         'Date', 
@@ -1018,21 +1026,68 @@ def main():
         ]
 
     # Separar el dataset
-    df_passthrough = df_clipped[columnas_intactas].copy()
-    df_clipped_features = df_clipped.drop(columns=columnas_intactas)
+    df_passthrough = df_transformed[columnas_intactas].copy()
+    df_transformed_features = df_transformed.drop(columns=columnas_intactas)
 
-    df_cont_clipped = df_clipped_features.select_dtypes(include="number")
-    df_winsor = df_cont_clipped.apply(lambda x: gestiona_outliers(x, clas='winsor'))
+    df_cont_transformed = df_transformed_features.select_dtypes(include="number")
+    df_winsor = df_cont_transformed.apply(lambda x: gestiona_outliers(x, clas='winsor'))
 
-    print("Gestión de outliers finalizada.")
+    print("Gestión inicial de outliers finalizada.")
+
+    # --- Transformaciones Finales ---
+
+    # Logarítmicas
+    columnas_log = [ 
+        'CapExToRevenue'
+        ]
+
+    df_transformed_final = transformar_log(
+        df_winsor, 
+        columnas_log, 
+        calculo_1p=True
+        )
+    
+    # Transformaciones Yeo-Johnson
+    columnas_yeo = [ 
+        'BookToMarket',
+        'EarningsYield'  
+        ]
+
+    df_transformed_final = transformar_yeo_johnson(
+        df_transformed_final, 
+        columnas_yeo
+        )
+    
+    print("Transformaciones finalizadas.")
+
+
+    # --- Tratamiento Final de Outliers ---
+
+    # Columnas a recortar:
+    tuplas_clipping = [
+        ('BookToMarket_Yeo', -3.5),
+        ('CapExToRevenue_Log1p', 0.45),
+        ('FreeCashFlow_TTM_Acceleration', -10.0),
+        ('FreeCashFlow_TTM_Acceleration', 10.0),
+        ('ShortTermBeta', -2.5),
+        ('ShortTermBeta', 5.0),
+        ('RevenueYield', -2.5),
+        ('RevenueYield', 7.5),
+        ('EarningsYield_Yeo', -5.0),
+        ('EarningsYield_Yeo', 5.0)
+        ] 
+    for col, limit in tuplas_clipping:
+        df_transformed_final = aplicar_clipping(df_transformed_final, columna=col, limite = limit)
+
+    print("Tratamiento de outliers finalizado.")
 
 
     # --- Concatenación final y almacenamiento ---
 
-    df_non_numeric_clipped = df_clipped_features.select_dtypes(exclude='number')
+    df_non_numeric = df_transformed_features.select_dtypes(exclude='number')
     # Se unen variables contínuas transformadas y variables no numéricas
-    df_combined = pd.concat([df_non_numeric_clipped, df_winsor], axis=1)
-   
+    df_combined = pd.concat([df_non_numeric, df_transformed_final], axis=1)
+
     # Unir con las columnas que fueron salteadas
     df_final = pd.concat([df_passthrough, df_combined], axis=1)
 
@@ -1042,7 +1097,7 @@ def main():
 
     # Guardar el dataframe
     df_final.to_parquet(clean_data_file)
-    print(f"Fase de Transformación finalizada.\nFichero 'clean_data.parquet' guardado en la carpeta de datos.")
+    print(f"Fichero 'clean_data.parquet' guardado en la carpeta de datos.")
     print("Dimensión de datos finales:", df_final.shape)
 
 if __name__ == "__main__":
