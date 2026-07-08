@@ -20,7 +20,7 @@ El objetivo es proporcionar un entorno de experimentación ágil para científic
 Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** A partir de la Variable categórica `MonthlyExcessReturn_Quantile`, la cual agrupa en 5 clusters los retornos mensuales en exceso al retorno de mercado, se obtiene la variable binaria `Target_Top_Quintile` para predecir la probabilidad de pertenecer al grupo más alto.
+* **Variable objetivo (Label):** A partir de la variable categórica `MonthlyExcessReturn_Quantile`, la cual agrupa en 5 clusters los retornos mensuales en exceso al retorno de mercado, se obtiene la variable binaria `Target_Top_Quintile` para predecir la probabilidad de pertenecer al grupo más alto.
 
 ---
 ## 📊 Screenshots
