@@ -546,10 +546,12 @@ import pandas as pd
 
 def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = 6) -> pd.DataFrame:
     """
-    Calcula retornos (basados en Open) y ShortTermBeta rezagados 1 periodo (Features).
-    Calcula además el MonthlyExcessReturn intra-mes (Close vs Open) alineado en t=0 (Target/Label base).
+    Calcula retornos (basados en Open), ShortTermBeta y Variance (Features).
+    No es necesario aplicar Lag a las variables calculadas para evitar Lookahead Bias, 
+    ya que el precio Open es conocido al obtenerlo.
+    Calcula además el MonthlyExcessReturn (Label).
     Incluye un flag 'Return_IsMissing' para registrar imputaciones.
-    """       
+    """        
     ticker_mercado = df_index['Ticker'].iloc[0]
     
     # Preparar datos uniendo panel e índice
@@ -562,6 +564,7 @@ def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana:
     # ==========================================
     # BLOQUE 1: FEATURES (Usa Open a Open)
     # ==========================================
+
     # Calcular retornos en bruto, extraer flag y luego imputar
     df_retornos_raw = df_open.pct_change(fill_method=None)
     df_return_is_missing = df_retornos_raw.isna().astype(int)
@@ -575,36 +578,37 @@ def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana:
     varianza_mercado = retornos_mercado_open.rolling(window=ventana, min_periods=min_periodos).var()
     covarianzas = df_activos_open.rolling(window=ventana, min_periods=min_periodos).cov(retornos_mercado_open)
     df_betas = covarianzas.div(varianza_mercado, axis=0)
-    
-    # Aplicar lag de 1 periodo a todas las features (Evitar Data Leakage)
-    df_activos_lag = df_activos_open.shift(1)
-    df_betas_lag = df_betas.shift(1)
-    df_missing_lag = df_missing_activos.shift(1) 
-    
-    # ==========================================
+    df_varianzas = df_activos_open.rolling(window=ventana, min_periods=min_periodos).var()
+      
+    # =========================================================
     # BLOQUE 2: TARGET/LABEL BASE (Usa Close vs Open intra-mes)
-    # ==========================================
+    # =========================================================
+
     # Retorno intra-mes: (Close / Open) - 1
     df_retornos_intra = (df_close / df_open) - 1
     
     retornos_mercado_intra = df_retornos_intra[ticker_mercado]
     df_activos_intra = df_retornos_intra.drop(columns=[ticker_mercado])
     
-    # Exceso de retorno intra-mes (Activo - Mercado), SIN LAG
+    # Exceso de retorno intra-mes (Activo - Mercado)
     df_exceso = df_activos_intra.sub(retornos_mercado_intra, axis=0)
     
     # ==========================================
     # BLOQUE 3: CONSOLIDACIÓN (Melt y Merge)
     # ==========================================
+
     # Transformar features a formato largo
-    df_ret_long = df_activos_lag.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='MonthlyReturn_Lag1'
+    df_ret_long = df_activos_open.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='MonthlyReturn'
     )
-    df_beta_long = df_betas_lag.reset_index().melt(
+    df_beta_long = df_betas.reset_index().melt(
         id_vars='Date', var_name='Ticker', value_name='ShortTermBeta'
     )
-    df_missing_long = df_missing_lag.reset_index().melt(
-        id_vars='Date', var_name='Ticker', value_name='Return_IsMissing_Lag1'
+    df_var_long = df_varianzas.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='Variance'
+    )
+    df_missing_long = df_missing_activos.reset_index().melt(
+        id_vars='Date', var_name='Ticker', value_name='Return_IsMissing'
     )
     
     # Transformar target base a formato largo
@@ -614,9 +618,10 @@ def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana:
     
     # Consolidar todo en un solo DataFrame temporal
     df_features_and_target = (df_ret_long
-                   .merge(df_beta_long, on=['Date', 'Ticker'])
-                   .merge(df_missing_long, on=['Date', 'Ticker'])
-                   .merge(df_exceso_long, on=['Date', 'Ticker']))
+                       .merge(df_beta_long, on=['Date', 'Ticker'])
+                       .merge(df_var_long, on=['Date', 'Ticker'])
+                       .merge(df_missing_long, on=['Date', 'Ticker'])
+                       .merge(df_exceso_long, on=['Date', 'Ticker']))
     
     # Unir con el DataFrame original
     df_final = pd.merge(df, df_features_and_target, on=['Date', 'Ticker'], how='left')
@@ -963,7 +968,7 @@ def main():
    
     # Transformaciones Yeo-Johnson
     columnas_yeo = [ 
-        'MonthlyReturn_Lag1',
+        'MonthlyReturn',
         'TotalRevenue_TTM_QoQ',
         'FcfToEbitda',
         'TotalRevenue_TTM_YoY',
@@ -975,7 +980,8 @@ def main():
         'ProfitMargins', 
         'ReturnOnAssets', 
         'ReturnOnEquity',
-        'EnterpriseValue'    
+        'EnterpriseValue',
+        'Variance'    
         ]
 
     df_transformed = transformar_yeo_johnson(

@@ -30,6 +30,31 @@ def split_ultimo(
     return X_train, X_test, y_train, y_test
 
 
+from sklearn.base import BaseEstimator, TransformerMixin
+
+class CrossSectionalRanker(BaseEstimator, TransformerMixin):
+    def __init__(self, date_col='Date'):
+        self.date_col = date_col
+        self.numeric_cols_ = None
+
+    def fit(self, X, y=None):
+        # Solución: Usar select_dtypes de Pandas para evitar errores con columnas categóricas
+        columnas_numericas = X.select_dtypes(include='number').columns.tolist()
+        
+        # Filtramos la columna de fecha (si por casualidad es numérica) y guardamos la lista
+        self.numeric_cols_ = [col for col in columnas_numericas if col != self.date_col]
+        return self
+
+    def transform(self, X):
+        X_df = X.copy()
+        # Aplicar el ranking agrupando por la columna de fecha
+        for col in self.numeric_cols_:
+            X_df[col] = X_df.groupby(self.date_col)[col].rank(pct=True)
+        
+        # Eliminar la columna Date para que no llegue al RandomForest
+        X_df = X_df.drop(columns=[self.date_col])
+        return X_df
+
 # Funciones "legacy": ya no se utilizan en el modelado por clasificación
 
 def obtener_metricas(y_real, y_pred, nombre_modelo):
