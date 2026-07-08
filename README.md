@@ -51,11 +51,11 @@ Otra restricción de la cuenta básica de `simFin` es que no ofrece información
 ```text
 FINDATAMINING/
 ├── data/                            # Almacenamiento local de datasets y archivos de configuración
-│   ├── reports/                     # Sub-directorio para almacenar los reportes generados luego de modelar
+│   ├── clean/                       # Sub-directorio para almacenar los datos depurados
+│   ├── raw/                         # Almacena los ficheros de datos crudos
 │   ├── simfin/                      # Almacena los ficheros de datos de simFin
+│   ├── reports/                     # Almacena los reportes generados en la fase de modelado
 │   ├── constituents.csv             # Fichero de las acciones constituyentes del Indice S&P 500
-│   ├── raw_data.parquet             # Datos crudos generados por la fase de Extracción
-│   ├── clean_data.parquet           # Datos limpios generados en la fase Transform
 │   ├── market_index.parquet         # Datos históricos de precios del índice del mercado
 │   ├── tickers_sin_datos.csv        # Tickers con datos faltantes, serán excluídos en las extracciones sucesivas
 ├── src/                             # Sub-directorio con los módulos de funciones auxiliares
@@ -81,7 +81,7 @@ FINDATAMINING/
 Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
 
 * **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** Variable categórica `MonthlyExcessReturn_Quantile`, la cual agrupa en 5 clusters los retornos mensuales en exceso al retorno de mercado.
+* **Variable objetivo (Target):** A partir de la Variable categórica `MonthlyExcessReturn_Quantile`, la cual agrupa en 5 clusters los retornos mensuales en exceso al retorno de mercado, se obtiene la variable binaria `Target_Top_Quintile` para predecir la probabilidad de pertenecer al grupo más alto.
 
 ---
 ## 🚀 Requisitos e Instalación
