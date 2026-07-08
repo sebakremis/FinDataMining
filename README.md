@@ -15,6 +15,14 @@ Cuenta con tres fases:
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste bajas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
 
 ---
+## 📊 Dataset y Variables
+
+Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
+
+* **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
+* **Variable objetivo (Target):** A partir de la Variable categórica `MonthlyExcessReturn_Quantile`, la cual agrupa en 5 clusters los retornos mensuales en exceso al retorno de mercado, se obtiene la variable binaria `Target_Top_Quintile` para predecir la probabilidad de pertenecer al grupo más alto.
+
+---
 ## 📊 Screenshots
 
 <div align="center">
@@ -43,7 +51,6 @@ Otra restricción de la cuenta básica de `simFin` es que no ofrece información
 * **Jupyter Notebooks:** Están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
 * **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar los mismos pasos desde el terminal. El objetivo es utilizar estos modulos para automatizar el pipeline desde el futuro panel de control. Ambas formas de ejecución funcionan correctamente, pero a veces `yfinance` no devuelve información financiera para muchos tickers. Puede deberse a micro-cortes en la conección a internet o a restricciones de la API. Recomiendo entonces ejecutar la primera extracción desde el notebook de a bloques, para evitar tener que reiniciar todo el flujo en caso de fallas en las descargas.
 * **Panel de Control** (planificado): Se incorporará un panel de control interactivo desarrollado en **Streamlit**, permitiendo la gestión automatizada del pipeline, así como la visualización dinámica de las variables. 
-
 
 ---
 ## 🗂️ Estructura Actual
@@ -74,14 +81,6 @@ FINDATAMINING/
 ├── README.md                        # Descripción del proyecto
 └── requirements.txt                 # Dependencias necesarias
 ```
-
----
-## 📊 Dataset y Variables
-
-Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
-
-* **Variables explicativas (Features):** Métricas operativas, de riesgo y estructura de capital, tales como `Return On Assets` (ROA), `Return on Equity` (ROE), `Debt to EBITDA`, `Profit Margins`, entre otras.
-* **Variable objetivo (Target):** A partir de la Variable categórica `MonthlyExcessReturn_Quantile`, la cual agrupa en 5 clusters los retornos mensuales en exceso al retorno de mercado, se obtiene la variable binaria `Target_Top_Quintile` para predecir la probabilidad de pertenecer al grupo más alto.
 
 ---
 ## 🚀 Requisitos e Instalación
