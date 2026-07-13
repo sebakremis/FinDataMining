@@ -997,6 +997,9 @@ def main():
     # Aplicar la categorización
     for col in cols_a_agrupar:
         df_transformed = categorizar_en_cuantiles(df_transformed, columna=col, num_cuantiles=5)
+    
+    # Crear label binaria: para simplificar la clasificación, 1 si es el Quintil 5
+    df_transformed['Target_Top_Quintile'] = np.where(df_transformed['MonthlyExcessReturn_Quantile'] == 5, 1, 0)
 
     print("Transformaciones iniciales finalizadas.")
 
