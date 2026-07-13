@@ -4,8 +4,13 @@ Módulo de la fase de modelado
 """
 import numpy as np
 import pandas as pd
+from datetime import datetime
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.base import BaseEstimator, TransformerMixin
+import shap
+import matplotlib.pyplot as plt
 import plotly.express as px
+from src.config import reports_folder
 
 
 def split_ultimo(
@@ -30,8 +35,6 @@ def split_ultimo(
     return X_train, X_test, y_train, y_test
 
 
-from sklearn.base import BaseEstimator, TransformerMixin
-
 class CrossSectionalRanker(BaseEstimator, TransformerMixin):
     def __init__(self, date_col='Date'):
         self.date_col = date_col
@@ -54,6 +57,145 @@ class CrossSectionalRanker(BaseEstimator, TransformerMixin):
         # Eliminar la columna Date para que no llegue al RandomForest
         X_df = X_df.drop(columns=[self.date_col])
         return X_df
+
+
+def generar_ranking_predicciones(pipe, X_live, df, clase_objetivo=1, etiqueta_senal='Top_Quantile'):
+    """
+    Aplica el modelo predictivo a los datos recientes, calcula probabilidades, 
+    genera señales de inversión y retorna los resultados ordenados.
+
+    Parámetros:
+    -----------
+    pipe : sklearn.pipeline.Pipeline
+        El pipeline entrenado con el preprocesador y el clasificador.
+    X_live : pd.DataFrame
+        El conjunto de datos de evaluación (mes actual en curso).
+    df : pd.DataFrame
+        El DataFrame original completo que contiene la columna 'Ticker'.
+    clase_objetivo : int, por defecto 1
+        La clase que representa el cuartil/quintil superior.
+    etiqueta_senal : str, por defecto 'Top_Quantile'
+        Etiqueta que se asignará a los casos positivos.
+
+    Retorna:
+    --------
+    resultados_agrupados:
+        DataFrame con Tickers, predicciones de clase, probabilidades y señales,
+        ordenado de mayor a menor probabilidad.
+    tickers_test:
+        tickers presentes en los datos de evaluación.
+    """
+    
+    # Predicciones de la clase y probabilidades
+    y_pred_class = pipe.predict(X_live)
+    y_pred_proba = pipe.predict_proba(X_live)
+
+    # Extraer el modelo final del pipeline para conocer el orden de las clases
+    rf_model = pipe.named_steps['model']
+
+    # Identificar el índice de la probabilidad de la clase objetivo
+    idx_top = list(rf_model.classes_).index(clase_objetivo)
+    proba_top = y_pred_proba[:, idx_top]
+
+    # Recuperar los Tickers correspondientes a X_live
+    tickers_test = df.loc[X_live.index, 'Ticker']
+
+    # Construir el DataFrame de resultados
+    resultados_agrupados = pd.DataFrame({
+        'Ticker': tickers_test.values,
+        'Predicted_Class': y_pred_class,
+        'Probability_Top': proba_top
+    })
+
+    # Generar la señal
+    resultados_agrupados['Signal'] = np.where(
+        resultados_agrupados['Predicted_Class'] == clase_objetivo, etiqueta_senal, 'Neutral'
+    )
+
+    # Ordenar resultados por la probabilidad de ser la clase objetivo
+    resultados_agrupados = resultados_agrupados.sort_values(by='Probability_Top', ascending=False)
+    
+    return resultados_agrupados, tickers_test
+
+
+def generar_reporte(df:pd.DataFrame, resultados_agrupados:pd.DataFrame)->pd.DataFrame:
+    # Se filtra df para mantener solo la fila más reciente de cada empresa
+    df_latest = df.drop_duplicates(subset=['Ticker'], keep='last')
+
+    df_reporte = resultados_agrupados.merge(df_latest, how='left', on='Ticker') 
+
+    dia = datetime.now().day
+    mes = datetime.now().month
+    year = datetime.now().year
+
+    # Crear carpeta si no existe y nombrar el archivo con la fecha
+    reports_folder.mkdir(parents=True, exist_ok=True)
+    nombre_archivo = f"{year}_{mes}_{dia}.csv"
+    ruta_completa = reports_folder / nombre_archivo
+
+    df_reporte.to_csv(ruta_completa, index=False)
+    print(f'Reporte exportado en la carpeta de datos.')
+
+    return df_reporte
+
+
+def graficar_explicacion_shap(ticker_a_explicar, pipe, X_live, tickers, clase_objetivo=1, max_display=10):
+    """
+    Genera un gráfico de cascada (waterfall) con los valores SHAP para explicar
+    la predicción de un modelo RandomForestClassifier dentro de un Pipeline.
+
+    Parámetros:
+    -----------
+    ticker_a_explicar : str
+        El ticker (símbolo financiero) que se desea evaluar (ej. 'XRX').
+    pipe : sklearn.pipeline.Pipeline
+        El pipeline entrenado que contiene los pasos 'pre' (ColumnTransformer) y 'model' (RandomForestClassifier).
+    X_live : pd.DataFrame
+        El conjunto de datos de predicción (features del mes actual en curso).
+    tickers : pd.Series o np.ndarray
+        Estructura con los Tickers correspondientes al índice de X_live.
+    clase_objetivo : int, por defecto 1
+        La clase del modelo para la cual se calculará la explicación (Top Quintile).
+    max_display : int, por defecto 10
+        Número máximo de características a mostrar en el gráfico de SHAP.
+    """
+    
+    # Verificación temprana del ticker
+    if ticker_a_explicar not in tickers.values:
+        print(f"El ticker {ticker_a_explicar} no se encuentra en el conjunto de test.")
+        return
+
+    # Extraer los componentes del pipeline
+    preprocessor = pipe.named_steps['pre']
+    rf_model = pipe.named_steps['model']
+
+    # Transformar los datos usando el preprocesador
+    X_test_transformed = preprocessor.transform(X_live)
+    feature_names = preprocessor.get_feature_names_out()
+
+    # Crear un DataFrame con los datos transformados para que SHAP lea los nombres
+    X_test_shap = pd.DataFrame(X_test_transformed, columns=feature_names, index=X_live.index)
+
+    # Obtener la posición del ticker y extraer su fila
+    idx = np.where(tickers.values == ticker_a_explicar)[0][0]
+    X_ticker_eval = X_test_shap.iloc[[idx]]
+
+    # Inicializar el explicador y calcular los valores SHAP
+    explainer = shap.TreeExplainer(rf_model)
+    shap_values = explainer(X_ticker_eval)
+
+    # Aislar la explicación específica para la clase objetivo
+    idx_top = list(rf_model.classes_).index(clase_objetivo)
+    shap_values_q5 = shap_values[..., idx_top]
+
+    print(f"--- Explicación de la probabilidad de ser Quintil {clase_objetivo} para: {ticker_a_explicar} ---")
+
+    # Crear la figura y visualizar
+    plt.figure(figsize=(10, 6))
+    shap.plots.waterfall(shap_values_q5[0], max_display=max_display)
+    plt.show()
+
+
 
 # Funciones "legacy": ya no se utilizan en el modelado por clasificación
 
