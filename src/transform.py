@@ -10,6 +10,7 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
+from typing import Optional
 from sklearn.preprocessing import PowerTransformer
 from src.clean_transform import corregir_anomalias, imputar_info
 from src.extract import extraer_info, obtener_cols_financieras
@@ -102,7 +103,100 @@ def mostrar_missings(df:pd.DataFrame)->pd.Series:
     return missings[missings > 0].sort_values(ascending=False)
 
 
-import pandas as pd
+def imputar_por_mediana_grupo(
+    df: pd.DataFrame, 
+    col_a_imputar: str, 
+    col_agrupadora: str, 
+    col_denominador: Optional[str] = None
+) -> pd.DataFrame:
+    """
+    Imputa los valores faltantes de una columna utilizando la mediana del grupo (Sector).
+    Si se especifica un denominador, calcula el ratio (col_a_imputar / col_denominador),
+    obtiene la mediana del ratio por grupo y escala la imputación multiplicando por el denominador.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        El DataFrame completo.
+    col_a_imputar : str
+        Nombre de la columna que contiene los missings (ej. 'DepreciationAndAmortization_TTM').
+    col_agrupadora : str
+        Nombre de la columna para agrupar los datos (ej. 'Sector').
+    col_denominador : str, opcional
+        Nombre de la columna que actúa como escala (ej. 'TotalAssets'). Por defecto es None.
+        
+    Returns:
+    --------
+    pd.DataFrame
+        Una copia del DataFrame con los valores imputados en 'col_a_imputar'.
+    """
+    # Creamos una copia para evitar efectos secundarios en el DataFrame original (Side Effects)
+    df_imputed = df.copy()
+    
+    # Validar que las columnas existan en el DataFrame
+    for col in [col_a_imputar, col_agrupadora]:
+        if col not in df_imputed.columns:
+            raise ValueError(f"La columna '{col}' no existe en el DataFrame.")
+            
+    if col_denominador and col_denominador not in df_imputed.columns:
+        raise ValueError(f"La columna denominador '{col_denominador}' no existe en el DataFrame.")
+
+    # --- CASO 1: IMPUTACIÓN POR RATIO (DENOMINADOR CONFIGURADO) ---
+    if col_denominador is not None:
+        # Filtro de seguridad: Evitar denominadores nulos, menores o iguales a cero para el cálculo del ratio
+        mask_denominador_valido = df_imputed[col_denominador] > 0
+        mask_datos_validos = df_imputed[col_a_imputar].notnull() & mask_denominador_valido
+        
+        # Calcular el ratio temporal
+        col_ratio_temp = '_temp_ratio_imputacion_'
+        df_imputed.loc[mask_datos_validos, col_ratio_temp] = (
+            df_imputed[col_a_imputar] / df_imputed[col_denominador]
+        )
+        
+        # Calcular la mediana del ratio por cada grupo (Sector) y mapearla al tamaño del df
+        mediana_ratio_grupo = df_imputed.groupby(col_agrupadora, observed=True)[col_ratio_temp].transform('median')
+        
+        # Primer Fallback: Mediana global del ratio por si un sector entero no tiene ningún dato válido
+        mediana_ratio_global = df_imputed.loc[mask_datos_validos, col_ratio_temp].median()
+        mediana_ratio_grupo = mediana_ratio_grupo.fillna(mediana_ratio_global)
+        
+        # Calcular los valores proyectados para la imputación
+        valores_imputados = mediana_ratio_grupo * df_imputed[col_denominador]
+        
+        # Rellenar los nulos de la variable original con los valores proyectados
+        df_imputed[col_a_imputar] = df_imputed[col_a_imputar].fillna(valores_imputados)
+        
+        # Limpieza: Eliminar la columna de ratio temporal
+        df_imputed = df_imputed.drop(columns=[col_ratio_temp])
+        
+        # Segundo Fallback de Seguridad: 
+        # Si el denominador era nulo o cero en una fila donde la variable original también era nula,
+        # la proyección por ratio fallará (dará NaN). En estos casos remotos, usamos la mediana directa.
+        if df_imputed[col_a_imputar].isnull().sum() > 0:
+            mediana_directa_grupo = df_imputed.groupby(col_agrupadora, observed=True)[col_a_imputar].transform('median')
+            mediana_directa_global = df_imputed[col_a_imputar].median()
+            
+            df_imputed[col_a_imputar] = (
+                df_imputed[col_a_imputar]
+                .fillna(mediana_directa_grupo)
+                .fillna(mediana_directa_global)
+            )
+
+    # --- CASO 2: IMPUTACIÓN DIRECTA POR MEDIANA (SIN DENOMINADOR) ---
+    else:
+        # Calcular la mediana directa de la columna por cada grupo
+        mediana_directa_grupo = df_imputed.groupby(col_agrupadora, observed=True)[col_a_imputar].transform('median')
+        
+        # Fallback: Mediana global por si algún grupo completo carece de datos
+        mediana_directa_global = df_imputed[col_a_imputar].median()
+        
+        # Aplicar la imputación en cascada
+        imputacion_final = mediana_directa_grupo.fillna(mediana_directa_global)
+        df_imputed[col_a_imputar] = df_imputed[col_a_imputar].fillna(imputacion_final)
+        
+    return df_imputed
+
+
 
 def imputar_equivalencias_financieras(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -114,11 +208,6 @@ def imputar_equivalencias_financieras(df: pd.DataFrame) -> pd.DataFrame:
     # =========================================================================
     # 1. IMPUTACIONES DE ESTADO DE RESULTADOS (P&L)
     # =========================================================================
-    
-    # Se imputan a cero los valores faltantes en "DepreciationAndAmortization".
-    # Se asume que es cero ya que empresas donde no es relevante no lo informan.
-    df_imputado['DepreciationAndAmortization_TTM'] = df_imputado['DepreciationAndAmortization_TTM'].fillna(0)
-
     # Se imputa 'EBITDA' mediante la ecuación: EBITDA = Operating Income + D&A
     cond_falta_ebitda = df_imputado['EBITDA_TTM'].isna() & df_imputado['OperatingIncome_TTM'].notna()
     df_imputado.loc[cond_falta_ebitda, 'EBITDA_TTM'] = (
@@ -885,8 +974,16 @@ def main():
     # Si persistieran casos, imputar manualmente en el modulo clean_transform:
     #df_clean = imputar_info(df_clean)
 
+    # imputar D&A por la mediana del Sector para el ratio D&A / Activos
+    df_financials_imputed = imputar_por_mediana_grupo(
+        df=df_clean,
+        col_a_imputar='DepreciationAndAmortization_TTM',
+        col_agrupadora='Sector',
+        col_denominador='TotalAssets'
+    )
+
     # imputar equivalencias financieras
-    df_financials_imputed = imputar_equivalencias_financieras(df_clean)
+    df_financials_imputed = imputar_equivalencias_financieras(df_financials_imputed)
 
     # Se imputan las columnas financieras, por su media o mediana móvil según sus asimetrías
     df_financials_imputed = imputar_numericas(df_financials_imputed)
