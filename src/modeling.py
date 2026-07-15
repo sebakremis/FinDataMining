@@ -5,12 +5,65 @@ Módulo de la fase de modelado
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import (
+    mean_squared_error, mean_absolute_error, 
+    r2_score, confusion_matrix, ConfusionMatrixDisplay
+    )
 from sklearn.base import BaseEstimator, TransformerMixin
 import shap
 import matplotlib.pyplot as plt
 import plotly.express as px
 from src.config import reports_folder
+
+class CrossSectionalScaler(BaseEstimator, TransformerMixin):
+    """
+    Escalador Transversal (Cross-Sectional Z-Score).
+    Estandariza variables numéricas calculando la media y desviación estándar 
+    agrupada de forma estricta por fecha y sector.
+    """
+    def __init__(self, groupby_cols=['Date', 'Sector'], features=None, min_samples=5):
+        self.groupby_cols = groupby_cols
+        self.features = features
+        self.min_samples = min_samples
+
+    def fit(self, X, y=None):
+        # Definimos las features a usar durante el fit para tenerlas disponibles
+        if self.features is None:
+            self.features_out_ = [col for col in X.columns if col not in self.groupby_cols and pd.api.types.is_numeric_dtype(X[col])]
+        else:
+            self.features_out_ = self.features
+        return self
+
+    def transform(self, X):
+        missing_cols = [col for col in self.groupby_cols if col not in X.columns]
+        if missing_cols:
+            raise ValueError(f"Las columnas de agrupación {missing_cols} no están en X.")
+
+        def z_score(series):
+            if len(series.dropna()) < self.min_samples:
+                return pd.Series(0, index=series.index, dtype=float)
+            
+            std = series.std()
+            if std == 0 or pd.isna(std):
+                return pd.Series(0, index=series.index, dtype=float)
+                
+            return (series - series.mean()) / std
+
+        # Aplicamos el Z-score
+        scaled_features = X.groupby(self.groupby_cols, observed=True)[self.features_out_].transform(z_score)
+
+        # Llenamos nulos con 0
+        scaled_features = scaled_features.fillna(0)
+
+        return scaled_features
+
+    def get_feature_names_out(self, input_features=None):
+        """
+        Método requerido por Scikit-Learn para rastrear los nombres de las columnas 
+        después de que pasan por el ColumnTransformer.
+        """
+        return np.array(self.features_out_)
+
 
 
 def split_ultimo(
@@ -35,28 +88,23 @@ def split_ultimo(
     return X_train, X_test, y_train, y_test
 
 
-class CrossSectionalRanker(BaseEstimator, TransformerMixin):
-    def __init__(self, date_col='Date'):
-        self.date_col = date_col
-        self.numeric_cols_ = None
+def mostrar_matriz_confusion(y, y_pred):
+    cm = confusion_matrix(y, y_pred)
 
-    def fit(self, X, y=None):
-        # Solución: Usar select_dtypes de Pandas para evitar errores con columnas categóricas
-        columnas_numericas = X.select_dtypes(include='number').columns.tolist()
-        
-        # Filtramos la columna de fecha (si por casualidad es numérica) y guardamos la lista
-        self.numeric_cols_ = [col for col in columnas_numericas if col != self.date_col]
-        return self
+    # Configurar la visualización
+    fig, ax = plt.subplots(figsize=(6, 6))
+    disp = ConfusionMatrixDisplay(
+        confusion_matrix=cm, 
+        display_labels=["Resto (0)", "Top Quintile (1)"]
+    )
 
-    def transform(self, X):
-        X_df = X.copy()
-        # Aplicar el ranking agrupando por la columna de fecha
-        for col in self.numeric_cols_:
-            X_df[col] = X_df.groupby(self.date_col)[col].rank(pct=True)
-        
-        # Eliminar la columna Date para que no llegue al RandomForest
-        X_df = X_df.drop(columns=[self.date_col])
-        return X_df
+    # Graficar
+    disp.plot(ax=ax, cmap='Blues', colorbar=False)
+    plt.title('Matriz de Confusión (Datos Históricos)')
+    plt.xlabel('Clase Predicha')
+    plt.ylabel('Clase Real')
+    plt.grid(False) # Desactivar la grilla para que se vea más limpia
+    plt.show()
 
 
 def generar_ranking_predicciones(pipe, X_live, df, clase_objetivo=1, etiqueta_senal='Top_Quantile'):

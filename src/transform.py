@@ -462,11 +462,11 @@ def crear_years_since_added(df:pd.DataFrame)->pd.DataFrame:
     #  Pasar DateAdded a formato datetime, los NaN se vuelven NaT (not a time)
     df['DateAdded'] = pd.to_datetime(df['DateAdded'], errors='coerce')
 
-    # Convertir a YearsSinceAdded, aqui los nulos regresan a NaN
-    df['YearsSinceAdded'] = round(((pd.Timestamp.now() - df['DateAdded']).dt.days / 365.25), 0)
+    # Convertir a YearsInSP500, aqui los nulos regresan a NaN
+    df['YearsInSP500'] = round(((pd.Timestamp.now() - df['DateAdded']).dt.days / 365.25), 0)
 
     # Se asignan a cero años los tickers que no pertenecen al Índice S&P 500
-    df['YearsSinceAdded'] = df['YearsSinceAdded'].fillna(0)
+    df['YearsInSP500'] = df['YearsInSP500'].fillna(0)
 
     # Eliminar la columna original
     df.drop('DateAdded', axis=1, inplace=True)
@@ -557,6 +557,9 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
 
     # Capital Intensity
     df_metrics['CapExToRevenue'] = np.abs(df_metrics['CapitalExpenditure_TTM']) / df_metrics['TotalRevenue_TTM']
+
+    # Accruals Ratio (Ratio de Devengos)
+    df_metrics['AccrualsRatio'] = (df_metrics['NetIncome_TTM'] - df_metrics['OperatingCashFlow_TTM'])/ df_metrics['TotalAssets']
     
     # Reemplazar por NaN todos los infinitos generados por divisiones por cero
     df_metrics.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -880,10 +883,10 @@ def gestiona_outliers(col,clas = 'check'):
     
      #print(col.name)
      # Condición de asimetría y aplicación de criterio 1 según el caso
-     if abs(col.skew()) < 1:
+     if abs(col.skew()) < 3:
         criterio1 = abs((col-col.mean())/col.std())>3
      else:
-        criterio1 = abs((col-col.median())/stats.median_abs_deviation(col.dropna()))>6 ## Considerar solo valores válidos!! dropna().
+        criterio1 = abs((col-col.median())/stats.median_abs_deviation(col.dropna()))>6 
      
      # Calcular primer cuartil     
      q1 = col.quantile(0.25)  
@@ -905,14 +908,6 @@ def gestiona_outliers(col,clas = 'check'):
             col.loc[criterio1&criterio2] = np.nan
             print('MissingDespues: ' + str(col.isna().sum()) +'\n')
             return(col)
-
-
-def winsorize_with_pandas(s, limits):
-    """
-    Aplica winsorización a una Serie de pandas utilizando los cuantiles como límites.
-    """
-    return s.clip(lower=s.quantile(limits[0], interpolation='lower'), 
-                  upper=s.quantile(1-limits[1], interpolation='higher'))
 
 
 def soft_winsorize(s, limits):
@@ -997,7 +992,7 @@ def main():
 
     # --- Feature Engineering ---
 
-    # Crear feature YearsSinceAdded
+    # Crear feature YearsInSP500
     df_with_features = crear_years_since_added(df_financials_imputed)
 
     # Calcular métricas financieras y ratios de valuación:
