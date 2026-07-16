@@ -130,6 +130,9 @@ def generar_universo_tickers(df_simfin_raw: pd.DataFrame,
 
 
 def estandarizar_simfin(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Estandariza los nombres de columnas de simFin según el mapa definido en config.py.
+    """
     df = df_raw.copy()
     
     # Renombrar las columnas según el mapa
@@ -179,8 +182,12 @@ def estandarizar_simfin(df_raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def gestionar_actualizacion(tickers_universe_list: list, df_simfin_standarized:pd.DataFrame) -> tuple[list, pd.DataFrame]:
+    """
+    Gestiona la actualización de tickers y datos financieros.
+    1. Si el archivo raw_data_file no existe, devuelve la lista completa de tickers y el DataFrame de simFin.
+    2. Si el archivo existe, filtra los tickers que necesitan actualización de precios y los datos de simFin que no están en el archivo.
+    """
 
-    
     # Si el archivo no existe, devuelve la lista completa
     if not raw_data_file.exists():
         return tickers_universe_list, df_simfin_standarized
@@ -328,6 +335,9 @@ def descargar_constituents_sp(force_update=False):
 
 
 def limpiar_constituents_sp(df:pd.DataFrame)->pd.DataFrame:
+    """
+    Limpia y estandariza el DataFrame de constituents del S&P 500.
+    """
     # Seleccionar y renombrar columnas
     df_tickers = df[["Symbol", "Date added"]].copy()
     df_tickers.rename(columns={
@@ -342,7 +352,9 @@ def limpiar_constituents_sp(df:pd.DataFrame)->pd.DataFrame:
 
 
 def extraer_info(tickers_list:list)->pd.DataFrame:
-    """Extrae información sobre los tickers, sin datos historicos."""
+    """
+    Extrae información sobre los tickers, sin datos historicos.
+    """
     dfs_info = []
 
     for ticker in tickers_list:
@@ -503,7 +515,10 @@ def extraer_financials(tickers_list: list, aproximar_fechas: bool = False) -> tu
         return pd.DataFrame(), tickers_sin_datos
 
 
-def guardar_tickers_sin_datos(sin_datos_set: set): 
+def guardar_tickers_sin_datos(sin_datos_set: set):
+    """
+    Guarda los tickers que no arrojaron datos en un archivo CSV, evitando duplicados.
+    """ 
     if not sin_datos_set:
         return
 
@@ -524,6 +539,9 @@ def guardar_tickers_sin_datos(sin_datos_set: set):
 
 
 def unir_financials(df_yfinance: pd.DataFrame, df_simfin: pd.DataFrame) -> pd.DataFrame:
+    """
+    Une los DataFrames de yfinance y simFin, priorizando los datos de yfinance en caso de solapamiento.
+    """
 
     # Retornos tempranos si hay dataframes vacíos
     if df_yfinance.empty and df_simfin.empty:
@@ -641,6 +659,9 @@ def transformar_flujos_a_ttm(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def obtener_cols_financieras(incluirTTM:bool=True)->list:
+    """
+    Devuelve la lista de columnas financieras, incluyendo o no las versiones TTM según el parámetro.
+    """
     if incluirTTM:
         cadena = '_TTM'
     else:
@@ -655,6 +676,12 @@ def obtener_cols_financieras(incluirTTM:bool=True)->list:
 
 
 def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Realiza la limpieza final del DataFrame consolidado de precios y datos financieros.
+    - Ordena por Ticker y Date.
+    - Aplica forward fill a las columnas financieras para completar datos de granularidad mensual.
+    - Elimina filas sin datos críticos: precio 'Open' y al menos una métrica financiera clave.
+    """
 
     # --- Cláusula de retorno temprano
     if df.empty:
@@ -695,6 +722,10 @@ def limpieza_final(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def guardar_raw_data(df_final_clean:pd.DataFrame)->pd.DataFrame:
+    """
+    Guarda el DataFrame final limpio en un archivo Parquet, 
+    asegurando que no se dupliquen datos y que se mantenga la consistencia histórica.
+    """
     df_datos_nuevos = df_final_clean.copy()
 
     # Validar si realmente hay datos nuevos para guardar

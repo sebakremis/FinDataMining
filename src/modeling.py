@@ -71,6 +71,9 @@ def split_ultimo(
     label: str, 
     cols_excluded: list[str]
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    """
+    Divide el DataFrame en conjuntos de entrenamiento y prueba basándose en la fecha más reciente.
+    """
     
     # Identificamos cuál es la fecha máxima en todo el dataset
     ultima_fecha = df['Date'].max()
@@ -89,6 +92,9 @@ def split_ultimo(
 
 
 def mostrar_matriz_confusion(y, y_pred):
+    """
+    Muestra la matriz de confusión para un modelo de clasificación binaria.
+    """
     cm = confusion_matrix(y, y_pred)
 
     # Configurar la visualización
@@ -167,6 +173,10 @@ def generar_ranking_predicciones(pipe, X_live, df, clase_objetivo=1, etiqueta_se
 
 
 def generar_reporte(df:pd.DataFrame, resultados_agrupados:pd.DataFrame)->pd.DataFrame:
+    """
+    Genera un reporte consolidado de predicciones y datos de empresas,
+    exportándolo a un archivo CSV con la fecha actual.
+    """
     # Se filtra df para mantener solo la fila más reciente de cada empresa
     df_latest = df.drop_duplicates(subset=['Ticker'], keep='last')
 
@@ -302,6 +312,10 @@ def procesar_resultados_prediccion(y_test, y_pred, tickers):
     return resultados_agrupados
 
 def visualizar_resultados_predicciones(resultados_agrupados: pd.DataFrame):
+    """
+    Visualiza los resultados de predicciones vs valores reales, coloreando por cluster de sesgo.
+    Además, imprime estadísticas de sesgo por cluster.
+    """
     fig = px.scatter(
         resultados_agrupados, 
         x='Observed', 

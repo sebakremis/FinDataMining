@@ -22,6 +22,12 @@ from src.config import (
 
 
 def limpiar_cadenas(texto):
+    """
+    Limpia cadenas de texto para las columnas 'Industry' y 'Sector':
+    - Reemplaza guiones por espacios.
+    - Capitaliza cada palabra.
+    - Cambia '&' por 'And'.
+    """
     if not isinstance(texto, str): # Por si hay valores nulos (NaN)
         return texto
     
@@ -54,6 +60,9 @@ def limpiar_industry_y_sector(df:pd.DataFrame)->pd.DataFrame:
 
 
 def recuperar_info(df:pd.DataFrame)->pd.DataFrame:
+    """
+    Recupera información faltante de 'Sector' e 'Industry' para los tickers que la tienen nula.
+    """
     df_out = df.copy()
     tickers = df_out[df_out['Sector'].isna() | df_out['Industry'].isna()]['Ticker'].unique().tolist()
     if len(tickers)==0:
@@ -82,6 +91,8 @@ def recuperar_info(df:pd.DataFrame)->pd.DataFrame:
 
 
 def columnas_en_millones(df:pd.DataFrame)->pd.DataFrame:
+    """
+    Convierte las columnas financieras a millones de dólares para mejorar la legibilidad."""
     cols = obtener_cols_financieras(incluirTTM=True)
     cols.append('Volume') # se convierte también el volumen
     cols.append('CashAndCashEquivalents') # no está en la lista de columnas de yfinance
@@ -414,6 +425,10 @@ def imputar_numericas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def quitar_nulos_relevantes(df:pd.DataFrame, cols_no_relevantes:list[str]=[])->pd.DataFrame:
+    """
+    Elimina filas con valores nulos en columnas numéricas relevantes,
+    ignorando las columnas que se consideran no relevantes.
+    """
     df_out = df.copy()
     cols_numericas = df_out.select_dtypes(include="number").columns
     cols_relevantes = [col for col in cols_numericas if col not in cols_no_relevantes]
@@ -459,6 +474,9 @@ def imputar_crecimientos(df:pd.DataFrame, cols:list[str])->pd.DataFrame:
 # --- Funciones de Feature Engineering ---
 
 def crear_years_since_added(df:pd.DataFrame)->pd.DataFrame:
+    """
+    Crea la columna 'YearsInSP500' a partir de la fecha de inclusión en el índice S&P 500.
+    """
     #  Pasar DateAdded a formato datetime, los NaN se vuelven NaT (not a time)
     df['DateAdded'] = pd.to_datetime(df['DateAdded'], errors='coerce')
 
@@ -580,6 +598,9 @@ def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def convertir_volumen_a_adv(df:pd.DataFrame)->pd.DataFrame:
+    """
+    Convierte la columna 'Volume' a 'AverageDailyVolume' estimando 21 días hábiles por mes.
+    """
     df['AverageDailyVolume'] = df['Volume'] / 21 # estimado de 21 días hábiles por mes
     df.drop('Volume', axis=1, inplace=True)
     return df
@@ -608,6 +629,10 @@ def calcular_crecimientos(df:pd.DataFrame, crecimiento_cols:list[str])->pd.DataF
 
 
 def calcular_aceleraciones(df:pd.DataFrame, cols:list)-> pd.DataFrame:
+    """
+    Calcula la aceleración de las variables de crecimiento, 
+    definida como la diferencia entre el crecimiento trimestral y el crecimiento interanual.
+    """
     df_out = df.copy()
     for col in cols:
         try:
@@ -625,6 +650,9 @@ def calcular_aceleraciones(df:pd.DataFrame, cols:list)-> pd.DataFrame:
 
 
 def calcular_lag(df:pd.DataFrame, cols:list,months:int=1)->pd.DataFrame:
+    """
+    Calcula el valor rezagado (lag) de las columnas especificadas.
+    """
     for col in cols:
         df[col+f'_Lag{months}'] = df[col].shift(months)
 
@@ -823,12 +851,19 @@ def graficar(col):
 
 
 def mostrar_asimetrias(df:pd.DataFrame):
+    """
+    Muestra la asimetría de las columnas numéricas del DataFrame.
+    """
     print(df.select_dtypes(include="number").skew().sort_values(ascending=False).to_string())
 
 
 # --- Funciones de Transformación
 
 def transformar_yeo_johnson(df: pd.DataFrame, cols: list) -> pd.DataFrame:
+    """
+    Aplica la transformación de Yeo-Johnson a las columnas especificadas del DataFrame.
+    Se crea una nueva columna con el sufijo '_Yeo' y se elimina la columna original.
+    """
     df_out = df.copy()
 
     # Inicializar el PowerTransformer
@@ -843,6 +878,10 @@ def transformar_yeo_johnson(df: pd.DataFrame, cols: list) -> pd.DataFrame:
 
 
 def transformar_log(df: pd.DataFrame, cols: list, calculo_1p: bool = False) -> pd.DataFrame:
+    """
+    Aplica la transformación logarítmica a las columnas especificadas del DataFrame.
+    Se crea una nueva columna con el sufijo '_Log' o '_Log1p' y se elimina la columna original.
+    """
     # Creamos una copia para no alterar el DataFrame original accidentalmente
     df_out = df.copy()
     
@@ -865,6 +904,11 @@ def transformar_log(df: pd.DataFrame, cols: list, calculo_1p: bool = False) -> p
 # --- Tratamiento de Outliers ---
 
 def aplicar_clipping(df:pd.DataFrame, columna:str, limite:float)->pd.DataFrame:
+    """ 
+    Aplica un límite superior o inferior a una columna del DataFrame.
+    Si el límite es positivo, actúa como un techo (clip superior).
+    Si el límite es negativo o cero, actúa como un piso (clip inferior).
+    """
     df_clipped = df.copy()
     if limite > 0:
         # Límite positivo: actúa como un techo
@@ -1107,7 +1151,9 @@ def main():
         ('EarningsYield', 2.0),          
         ('TotalRevenue_TTM_Acceleration', -2.0),
         ('TotalRevenue_TTM_Acceleration', 2.0),
-        ('CapExToRevenue', 1.0)
+        ('CapExToRevenue', 1.0),
+        ('AccrualsRatio', -1.0),
+        ('AccrualsRatio', 1.0)
         ] 
     for col, limit in tuplas_clipping:
         df_transformed = aplicar_clipping(df_transformed, columna=col, limite = limit)
