@@ -14,6 +14,24 @@ Cuenta con tres fases:
 El objetivo es proporcionar un entorno de experimentación ágil para científicos de datos. A modo de validación, el proyecto público implementa un modelo base de *RandomForest*, el cual arroja métricas de ajuste moderadas, un resultado previsible dada la naturaleza ruidosa y no estacionaria de los datos financieros, asi como la disponibilidad limitada de datos. 
 
 ---
+## 🗄️ Fuentes de Datos
+
+El pipeline de extracción obtiene datos históricos de precios de mercado y los balances corporativos disponibles de forma libre y gratuita, a través de las librerías: 
+
+- `yfinance`: Se obtienen los precios históricos, información de Sector e Industria y los datos financieros correspondientes a los últimos cuatro reportes financieros trimestrales. 
+
+- `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio web (https://simfin.com/). Las instrucciones para ingresar la clave en el repositorio se encuentran en el fichero src/data_sources.example.py.
+
+Otra restricción de la cuenta básica de `simFin` es que no ofrece información histórica completa para todos los tickers. Se define entonces un universo de 550 empresas a partir de aquellas que, teniendo una cantidad mínima de información trimestral disponible, presentan un mayor nivel de ventas en promedio. De los 550 tickers obtenidos inicialmente, algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, pudiendo reemplazarlos por nuevos tickers si se repite la fase de extracción.
+
+---
+## 💻 Ejecución
+
+`finDataMining` presenta dos formas de ejecución:
+* **Jupyter Notebooks:** Están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
+* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar los mismos pasos desde el terminal y automatizar la ejecución del pipeline. Ambas formas de ejecución funcionan correctamente, pero a veces `yfinance` no devuelve información financiera para muchos tickers. Puede deberse a micro-cortes en la conección a internet o a restricciones de la API. Recomiendo entonces ejecutar la primera extracción desde el notebook de a bloques, para evitar tener que reiniciar todo el flujo en caso de fallas en las descargas.
+
+---
 ## 📊 Dataset y Variables
 
 Tras cruzar la información de los estados financieros con las series de precios históricos, se estructuran las siguientes dimensiones:
@@ -31,24 +49,6 @@ Tras cruzar la información de los estados financieros con las series de precios
   <img src="docs/images/ej_shap.png" alt="Ejemplo de Shap" width="90%"> 
 
 </div>
-
----
-## 🗄️ Fuentes de Datos
-
-El pipeline de extracción obtiene datos históricos de precios de mercado y los balances corporativos disponibles de forma libre y gratuita, a través de las librerías: 
-
-- `yfinance`: Se obtienen los precios históricos, información de Sector e Industria y los datos financieros correspondientes a los últimos cuatro reportes financieros trimestrales. 
-
-- `simFin`: A través de una cuenta gratuita, `simFin` ofrece datos trimestrales de 5 años, con un año de retraso. Su uso requiere de una clave API, la cual se obtiene registrándose en el sitio web (https://simfin.com/). Las instrucciones para ingresar la clave en el repositorio se encuentran en el fichero src/data_sources.example.py.
-
-Otra restricción de la cuenta básica de `simFin` es que no ofrece información histórica completa para todos los tickers. Se define entonces un universo de 550 empresas a partir de aquellas que, teniendo una cantidad mínima de información trimestral disponible, presentan un mayor nivel de ventas en promedio. De los 550 tickers obtenidos inicialmente, algunos son descartados posteriormente al no contar con datos de precios o financieros en `yfinance`, pudiendo reemplazarlos por nuevos tickers si se repite la fase de extracción.
-
----
-## 🚧 Estado del Proyecto
-
-`finDataMining` presenta actualmente dos formas de ejecución:
-* **Jupyter Notebooks:** Están estructurados específicamente para ser ejecutados celda a celda. Este diseño interactivo facilita el análisis paso a paso, la experimentación matemática, el diagnóstico visual del pipeline y la calibración de los modelos de Machine Learning.
-* **Ejecución en terminal:** Los scripts `extract.py` y `transform.py` replican el flujo de los Notebooks en sus bloques *main*, permitiendo efectuar los mismos pasos desde el terminal y automatizar la ejecución del pipeline. Ambas formas de ejecución funcionan correctamente, pero a veces `yfinance` no devuelve información financiera para muchos tickers. Puede deberse a micro-cortes en la conección a internet o a restricciones de la API. Recomiendo entonces ejecutar la primera extracción desde el notebook de a bloques, para evitar tener que reiniciar todo el flujo en caso de fallas en las descargas.
 
 ---
 ## 🗂️ Estructura Actual
