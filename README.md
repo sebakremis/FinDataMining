@@ -1,7 +1,6 @@
 # 📊 FinDataMining
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)
-![Machine Learning](https://img.shields.io/badge/Machine%20Learning-Regression-orange)
 ![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-Pipeline-green)
 ![UCM](https://img.shields.io/badge/UCM-Máster_Data_Science-8b0000.svg)
 
