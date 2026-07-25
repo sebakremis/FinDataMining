@@ -24,3 +24,6 @@ data/
 
 # Fichero data_sources.py con las claves api en local
 src/data_sources.py
+
+# Notebook privado
+04_Modelado_NN.ipynb
