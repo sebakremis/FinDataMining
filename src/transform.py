@@ -660,10 +660,6 @@ def calcular_lag(df:pd.DataFrame, cols:list,months:int=1)->pd.DataFrame:
     return df
 
 
-import pandas as pd
-
-import pandas as pd
-
 def calcular_retornos_y_betas(df: pd.DataFrame, df_index: pd.DataFrame, ventana: int = 12, min_periodos: int = 6) -> pd.DataFrame:
     """
     Calcula retornos (basados en Open), ShortTermBeta y Variance (Features).
